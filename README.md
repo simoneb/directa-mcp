@@ -77,6 +77,8 @@ claude mcp add directa-dev --scope user -- D:\dev\trading\directa-mcp\.venv\Scri
 
 Il server parla con Darwin, non con Directa. Se Darwin è chiuso o disconnesso ogni tool fallisce, e `check_connection` te lo dice in chiaro. Non serve nessuna chiave API né credenziale nella configurazione: l'autenticazione è il fatto che Darwin è loggato sulla tua macchina.
 
+Puoi anche farlo partire da qui, con `start_darwin` — vedi [Avvio di Darwin](#avvio-di-darwin-start_darwin).
+
 ### 3. Chiedi in italiano
 
 Non c'è niente da imparare a memoria — i tool si descrivono da soli e Claude sceglie quale usare. Cose che funzionano oggi:
@@ -88,6 +90,7 @@ Non c'è niente da imparare a memoria — i tool si descrivono da soli e Claude 
 - *"Quanto posso investire?"* → `get_availability`
 - *"Com'è andato l'ordine su M.100001?"*
 - *"Darwin è connesso?"* → `check_connection`
+- *"Avvia Darwin"* → `start_darwin`, se l'hai abilitato
 
 Cose che **non** funzionano, e perché:
 
@@ -111,6 +114,9 @@ Testato contro **Darwin 2.5.1** su un conto reale (`PROD`), il 2026-08-12:
 - ✅ `get_portfolio_overview`, con riconciliazione a **0,00 €** di residuo contro le cifre di Darwin su 15 posizioni
 - ✅ `get_orders`, incluso `pending_only`
 - ✅ Il gate sugli ordini: con `DIRECTA_ENABLE_ORDERS` non impostato i tool di trading non inviano nulla
+- ✅ `start_darwin`: ciclo completo verificato. dGO lanciato, autologin passato, pagina OTP, e dopo il codice Darwin è partito da solo via AutoSelezione — porte 10002 e 10003 aperte, `CONN_OK`, posizioni lette. Verificato anche che `dGO.exe` esce subito lasciando vivo il suo `java.exe`, che sopravvive alla morte del processo che l'ha lanciato, e che una seconda chiamata a Darwin già avviato risponde `launched: false` senza aprire nulla. Rami che non lanciano (gate chiuso, login in corso, dGO inesistente) coperti dai test.
+- ✅ Il rilevamento dei processi: con Darwin avviato restituisce esattamente i due `java.exe` del runtime dGO riportati da `Win32_Process`, e forzando le porte a "chiuse" `start_darwin` rifiuta di aprire un secondo dGO.
+- ℹ️ Osservato durante quella verifica: **le porte si aprono qualche secondo prima del collegamento**. Nella finestra intermedia `get_darwin_status` risponde `CONN_UNAVAILABLE` pur con le porte raggiungibili; poco dopo `CONN_OK`. Non è un guasto, è l'avvio in corso.
 - ⚠️ Tool storici (`get_daily_candles`, `get_intraday_candles`, `get_candle_data_range`, `get_tick_data`): raggiungono Darwin e restituiscono correttamente l'errore, ma **non è stato possibile vedere dati reali** perché il conto di test non ha le quotazioni abilitate (`1032`). Il formato delle righe `CANDLE;`/`TBT;` viene dalla documentazione ed è da confermare.
 - ✅ `preview_limit_order`: restituisce la dichiarazione pre-trade di Darwin — commissione, importo, nome dello strumento, conflitto d'interesse — e **non piazza nulla** (`on_market: false`, portafoglio e liquidità invariati).
 - ✅ `place_limit_order`: ciclo completo verificato con un ordine reale. `ACQAZ` → `TRADCONFIRM 3003` → `CONFORD` → `TRADOK 3000`, ordine a mercato con stato `2000`, confermato rileggendo da Darwin.
@@ -146,11 +152,42 @@ Si chiamava `DIRECTA_LIVE_TRADING`, nome che implicava l'esistenza di un trading
 
 Con il flag a `true` gli ordini sono reali, con soldi reali, e sono la parte non verificata di questo server.
 
+## Avvio di Darwin (`start_darwin`)
+
+Con `DIRECTA_AUTOSTART=true` il server espone `start_darwin`, che lancia **dGO**. Non lancia Darwin direttamente, perché Darwin non ha un eseguibile installato: è un jar che dGO scarica in `~/.directa/tmp/darwin.jar` e avvia così
+
+```
+java -cp darwin.jar;... directa.ui.Darwin www1.directatrading.com <TOKEN> -distro=E ...
+```
+
+dove `<TOKEN>` è un ticket di sessione emesso al login e **diverso a ogni avvio** (verificabile nei log del launcher, `~/.directa/log/LauncherHTML-dGO.*`). Quel comando non è quindi ripetibile, e l'unico punto d'ingresso praticabile resta dGO.
+
+Perché arrivi fino a Darwin invece di fermarsi sulla griglia delle tile, in **dGO > Preferenze > AutoSelezione** va scelto "Darwin 2" e spuntata la casella. È l'impostazione `preferredAction` di dGO, che il server **non scrive**: qui non si tocca nessun file, nessuna chiave di registro, nessun processo che non sia stato avviato da noi.
+
+**Resta comunque un umano nel percorso**: Darwin chiede l'OTP. Perciò il tool non aspetta — ritorna appena dGO è partito, e sei tu a completare il login. Da lì `check_connection` riporta uno dei tre stati:
+
+| `darwin.state` | Significato |
+|---|---|
+| `running` | Le porte rispondono, non c'è niente da avviare |
+| `starting` | Porte chiuse, ma o dGO è stato lanciato da qui negli ultimi 5 minuti, o c'è software Directa in esecuzione — tipicamente si attende l'OTP |
+| `stopped` | Nessuna porta, e nessun processo Directa sulla macchina |
+
+`start_darwin` lancia **solo** in stato `stopped`. Directa ammette una sessione per volta, e un dGO in più rischia di far cadere il login in corso.
+
+Il secondo segnale dello stato `starting` è una scansione dei processi che girano dalla directory di installazione di dGO (`CreateToolhelp32Snapshot` + `QueryFullProcessImageNameW` via `ctypes`, senza dipendenze né comandi esterni). Il match è sulla **directory**, non sul nome: `dGO.exe` esce pochi secondi dopo l'avvio lasciando in piedi il `java.exe` del runtime che si porta dietro, ed è quello a restare. Lo stesso runtime esegue poi Darwin, quindi un riscontro significa "c'è roba di Directa in esecuzione" più che "c'è il launcher" — distinzione che non serve, perché il caso in cui Darwin è davvero su lo risolvono le porte prima di arrivare qui. Se la scansione non può funzionare (dGO non installato, handle non apribile, processo che sparisce a metà) risponde "niente trovato": una diagnostica non deve essere ciò che rompe la diagnosi.
+
+Un limite resta, ed è strutturale: con l'OTP obbligatorio questo server **non è automatizzabile senza presidio** (cron, agenti schedulati). Qualcuno deve digitare il codice.
+
+`start_darwin` non chiude mai Darwin, e non esiste uno `stop_darwin`. Chiudere una piattaforma che può avere ordini di lavoro sul book non è una decisione da automatizzare.
+
+Il flag è separato da `DIRECTA_ENABLE_ORDERS` di proposito: avviare la piattaforma e poterle mandare ordini sono due consensi distinti.
+
 ## Tool esposti
 
 | Tool | Descrizione | Stato |
 |---|---|---|
-| `check_connection` | Raggiungibilità TCP delle porte Darwin (diagnostica, non richiede login) | ✅ |
+| `check_connection` | Raggiungibilità TCP delle porte Darwin, più lo stato `running`/`starting`/`stopped` (diagnostica, non richiede login) | ✅ |
+| `start_darwin` | Lancia dGO perché tu possa avviare Darwin; non attende, l'OTP resta tuo. Serve `DIRECTA_AUTOSTART=true` | ✅ |
 | `get_darwin_status` | Stato connessione, release, e se il datafeed è abilitato | ✅ |
 | `get_account_balance` | Liquidità, P&L aperto, equity (`INFOACCOUNT`) | ✅ |
 | `get_availability` | Potere d'acquisto, con e senza margine (`INFOAVAILABILITY`) | ✅ |

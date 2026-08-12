@@ -25,6 +25,14 @@ class Settings:
     #: It lives in the server's environment specifically so that the model
     #: driving the tools cannot change it.
     orders_enabled: bool
+    #: Whether start_darwin may launch dGO. Off, the tool refuses and says so;
+    #: it never happens implicitly on a failed connection, because launching
+    #: puts a login window and an OTP prompt in front of the user, which is not
+    #: something an unrelated tool call should do on its own.
+    autostart_enabled: bool
+    #: Where dGO's executable lives. None means "use the platform default",
+    #: which exists only on Windows — see launcher.default_dgo_path.
+    dgo_path: str | None
 
 
 def load_settings() -> Settings:
@@ -33,6 +41,8 @@ def load_settings() -> Settings:
         trading_port=int(os.environ.get("DIRECTA_TRADING_PORT", "10002")),
         historical_port=int(os.environ.get("DIRECTA_HISTORICAL_PORT", "10003")),
         orders_enabled=_bool_env("DIRECTA_ENABLE_ORDERS", False),
+        autostart_enabled=_bool_env("DIRECTA_AUTOSTART", False),
+        dgo_path=os.environ.get("DIRECTA_DGO_PATH") or None,
     )
 
 

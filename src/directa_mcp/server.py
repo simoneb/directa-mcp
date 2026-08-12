@@ -4,9 +4,11 @@ from typing import Any, Callable, Literal
 
 from mcp.server.fastmcp import FastMCP
 
+from . import launcher
 from .client import check_ports, historical_client, trading_client
 from .config import settings
 from .dapi import DapiConnectionError, DapiError, DapiTimeout
+from .launcher import LauncherError
 
 mcp = FastMCP(
     "directa-mcp",
@@ -17,6 +19,12 @@ Prerequisites the user must have in place: Darwin running and logged in with
 API access enabled (Sviluppatori > Dev kit in Darwin, disclaimer signed on
 directatrading.com). If any tool fails with a connection error, call
 check_connection first and tell the user to verify Darwin is running.
+
+Darwin can be started with start_darwin when the server allows it, but never
+start it as a side effect of another request: it opens a login window and asks
+the user for an OTP, so propose it and let the user decide. It also never
+finishes on its own — after start_darwin, the user completes the login and only
+then do the ports open.
 
 Symbols follow Directa's own format: <TICKER>.MI for stocks on Borsa Italiana
 (e.g. ENI.MI), bare tickers for ETFs (e.g. VWCE), and M.<number> for bonds.
@@ -43,12 +51,25 @@ class OrdersDisabled(RuntimeError):
     """An order tool was called while the order gate is closed."""
 
 
+class AutostartDisabled(RuntimeError):
+    """start_darwin was called while the autostart gate is closed."""
+
+
 def _require_orders_enabled() -> None:
     if not settings.orders_enabled:
         raise OrdersDisabled(
             "Order tools are disabled because the server was not started with "
             "DIRECTA_ENABLE_ORDERS=true. Nothing was sent to Darwin — no order was "
             "placed, modified or cancelled."
+        )
+
+
+def _require_autostart_enabled() -> None:
+    if not settings.autostart_enabled:
+        raise AutostartDisabled(
+            "start_darwin is disabled because the server was not started with "
+            "DIRECTA_AUTOSTART=true. Nothing was launched. Ask the user to start "
+            "Darwin from dGO themselves."
         )
 
 
@@ -65,6 +86,10 @@ def tool(fn: Callable[..., dict[str, Any]]) -> Callable[..., dict[str, Any]]:
             return {"success": True, **fn(*args, **kwargs)}
         except OrdersDisabled as exc:
             return {"success": False, "blocked": True, "sent_to_darwin": False, "error": str(exc)}
+        except AutostartDisabled as exc:
+            return {"success": False, "blocked": True, "launched": False, "error": str(exc)}
+        except LauncherError as exc:
+            return {"success": False, "launched": False, "error": str(exc)}
         except DapiError as exc:
             return {
                 "success": False,
@@ -83,8 +108,52 @@ def check_connection() -> dict[str, Any]:
     """Check whether Darwin's local trading and historical-data ports are
     reachable. Call this first if any other tool fails: it distinguishes
     "Darwin is not running" from "Darwin refused the command", and needs only
-    Darwin running and listening, not the account logged in."""
-    return {"ports": check_ports(), "orders_enabled": settings.orders_enabled}
+    Darwin running and listening, not the account logged in.
+
+    `darwin.state` is running, starting or stopped, and `darwin.hint` says what
+    to do about it. This is also the tool to poll after start_darwin, once the
+    user says they have finished the login."""
+    ports = check_ports()
+    return {
+        "ports": ports,
+        "darwin": _darwin_state(ports["trading"]["reachable"]),
+        "orders_enabled": settings.orders_enabled,
+        "autostart_enabled": settings.autostart_enabled,
+    }
+
+
+def _darwin_state(trading_port_reachable: bool) -> dict[str, Any]:
+    return launcher.describe(
+        trading_port_reachable, settings.autostart_enabled, settings.dgo_path
+    )
+
+
+@tool
+def start_darwin() -> dict[str, Any]:
+    """Launch dGO, Directa's launcher, so the user can bring Darwin up. Needs
+    the server to have been started with DIRECTA_AUTOSTART=true.
+
+    This does not finish the job and does not wait: Darwin requires an OTP, so
+    the call returns as soon as dGO is running and the user takes it from
+    there. Tell them to complete the login (and, if dGO stops on its tile grid
+    rather than opening Darwin, that AutoSelezione must be set to "Darwin 2" in
+    dGO's Preferenze), then call check_connection to see whether the ports have
+    opened. Do not call this repeatedly while waiting — Directa allows one
+    session at a time, and a second dGO can disturb the login in progress.
+
+    Since it puts a window and an OTP prompt in front of the user, never call it
+    on your own initiative to repair a failed tool: propose it and let the user
+    ask for it."""
+    _require_autostart_enabled()
+
+    # Anything other than "stopped" means Darwin is up, coming up, or already
+    # being logged in, and a second dGO would only get in the way.
+    state = _darwin_state(check_ports()["trading"]["reachable"])
+    if state["state"] != "stopped":
+        return {"launched": False, "darwin": state}
+
+    started = launcher.start_dgo(settings.dgo_path)
+    return {"launched": True, **started, "darwin": _darwin_state(False)}
 
 
 @tool
