@@ -112,7 +112,9 @@ Testato contro **Darwin 2.5.1** su un conto reale (`PROD`), il 2026-08-12:
 - ✅ `get_orders`, incluso `pending_only`
 - ✅ Il gate sugli ordini: con `DIRECTA_ENABLE_ORDERS` non impostato i tool di trading non inviano nulla
 - ⚠️ Tool storici (`get_daily_candles`, `get_intraday_candles`, `get_candle_data_range`, `get_tick_data`): raggiungono Darwin e restituiscono correttamente l'errore, ma **non è stato possibile vedere dati reali** perché il conto di test non ha le quotazioni abilitate (`1032`). Il formato delle righe `CANDLE;`/`TBT;` viene dalla documentazione ed è da confermare.
-- ❌ Tool sugli ordini (`place_limit_order`, `modify_order`, `confirm_order`, `cancel_order`, `cancel_all_orders`): **non verificati**. L'unico conto disponibile è reale, con posizioni e ordini vivi, e non è stato inviato nessun ordine. La sintassi dei comandi viene dalla documentazione, corroborata dal campo `operation` degli `ORDER` piazzati dall'interfaccia di Darwin. Al primo uso reale, verifica l'esito con `get_orders` invece di fidarti dell'ack.
+- ✅ `preview_limit_order`: verificato su conto reale. Restituisce la dichiarazione pre-trade di Darwin — commissione, importo, nome dello strumento, conflitto d'interesse — e **non piazza nulla** (`on_market: false`, portafoglio e liquidità invariati).
+- ⚠️ `place_limit_order`: il comando `ACQAZ` e la risposta `TRADCONFIRM` sono verificati; la **conferma** che porta l'ordine a mercato non è mai stata eseguita, quindi nessun ordine è mai entrato da qui.
+- ❌ `modify_order`, `cancel_order`, `cancel_all_orders`: non verificati. La sintassi viene dalla documentazione. Al primo uso reale verifica l'esito con `get_orders` invece di fidarti dell'ack.
 
 ## Perché un client interno
 
@@ -154,9 +156,9 @@ Con il flag a `true` gli ordini sono reali, con soldi reali, e sono la parte non
 | `get_portfolio_overview` | Posizioni con prezzo e valore ricavati, totali e P&L, con verifica di riconciliazione | ✅ |
 | `get_position` | Una singola posizione per simbolo | ✅ |
 | `get_orders` | Ordini della giornata con stato decodificato; `pending_only` per i soli attivi | ✅ |
-| `place_limit_order` | Ordine limite buy/sell | ❌ non verificato |
+| `preview_limit_order` | Cosa costerebbe un ordine, **senza piazzarlo**: commissioni, importo, strumento | ✅ |
+| `place_limit_order` | Ordine limite buy/sell, con conferma nella stessa connessione | ⚠️ parziale |
 | `modify_order` | Modifica prezzo di un ordine aperto | ❌ non verificato |
-| `confirm_order` | Conferma un ordine che ha risposto `TRADCONFIRM` | ❌ non verificato |
 | `cancel_order` | Cancella un ordine per ID | ❌ non verificato |
 | `cancel_all_orders` | Cancella tutti gli ordini su un simbolo | ❌ non verificato |
 | `get_daily_candles` | Candele giornaliere OHLC | ⚠️ serve datafeed |

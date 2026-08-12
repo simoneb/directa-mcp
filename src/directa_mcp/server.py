@@ -168,6 +168,41 @@ def get_orders(pending_only: bool = False, symbol: str | None = None) -> dict[st
 
 
 @tool
+def preview_limit_order(
+    symbol: str,
+    side: Literal["buy", "sell"],
+    quantity: int,
+    price: float,
+    order_id: str | None = None,
+) -> dict[str, Any]:
+    """Ask Darwin what an order would cost, without placing it. Use this before
+    place_limit_order, and whenever the user asks about commissions.
+
+    The order is submitted and deliberately left unconfirmed, so it never
+    reaches the market, and Darwin answers with its pre-trade disclosure: the
+    instrument's full name, the amount, the commission that would apply, and any
+    conflict-of-interest note. This is the only way to obtain commission
+    figures — no dAPI command reports them, and they depend on the order's
+    value, so they cannot be looked up in advance.
+
+    Read `on_market` in the response before describing the outcome. It should be
+    false. If it is true, Darwin was not configured to ask for confirmation and
+    the order IS live — say so immediately and prominently.
+
+    Subject to the same DIRECTA_ENABLE_ORDERS gate as place_limit_order, since
+    this does send an order command to a real account."""
+    _require_orders_enabled()
+    with trading_client() as api:
+        reference = order_id or f"MCP{int(time.time())}"
+        return {
+            "sent_to_darwin": True,
+            "data": api.place_limit_order(
+                symbol, side, quantity, price, reference, confirm=False
+            ),
+        }
+
+
+@tool
 def place_limit_order(
     symbol: str,
     side: Literal["buy", "sell"],
@@ -175,18 +210,30 @@ def place_limit_order(
     price: float,
     order_id: str | None = None,
 ) -> dict[str, Any]:
-    """Place a limit order. Disabled unless the server runs with
-    DIRECTA_ENABLE_ORDERS=true, in which case this places a REAL order with real
-    money — there is no simulation mode.
+    """Place a REAL limit order with real money. There is no simulation mode.
+    Disabled unless the server runs with DIRECTA_ENABLE_ORDERS=true.
+
+    Prefer preview_limit_order first: it reports the commission and the exact
+    instrument Darwin matched, without placing anything.
+
+    Darwin requires a two-step submit-then-confirm exchange, and both steps
+    happen inside this one call because a pending confirmation does not survive
+    the connection that produced it. Read `on_market` in the response to know
+    whether the order is actually working — an exchange that completes without
+    error has still placed nothing if confirmation did not go through. Then
+    verify with get_orders rather than trusting the acknowledgement.
 
     order_id is the client-side reference Darwin echoes back; one is generated
-    if omitted. If the response has confirmation_required, the order is NOT on
-    the market until confirm_order is called with the same id. Always verify
-    with get_orders afterwards."""
+    if omitted."""
     _require_orders_enabled()
     with trading_client() as api:
         reference = order_id or f"MCP{int(time.time())}"
-        return {"sent_to_darwin": True, "data": api.place_limit_order(symbol, side, quantity, price, reference)}
+        return {
+            "sent_to_darwin": True,
+            "data": api.place_limit_order(
+                symbol, side, quantity, price, reference, confirm=True
+            ),
+        }
 
 
 @tool
@@ -194,19 +241,14 @@ def modify_order(
     order_id: str, price: float, signal_price: float | None = None
 ) -> dict[str, Any]:
     """Change the limit price of an open order (signal_price applies only to
-    stop orders). Same order gate as place_limit_order."""
+    stop orders). Confirms in the same exchange, like place_limit_order, and
+    reports `on_market`. Same order gate."""
     _require_orders_enabled()
     with trading_client() as api:
-        return {"sent_to_darwin": True, "data": api.modify_order(order_id, price, signal_price)}
-
-
-@tool
-def confirm_order(order_id: str) -> dict[str, Any]:
-    """Confirm an order that came back with confirmation_required. Until this
-    succeeds the order is not on the market. Same order gate."""
-    _require_orders_enabled()
-    with trading_client() as api:
-        return {"sent_to_darwin": True, "data": api.confirm_order(order_id)}
+        return {
+            "sent_to_darwin": True,
+            "data": api.modify_order(order_id, price, signal_price, confirm=True),
+        }
 
 
 @tool

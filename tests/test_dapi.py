@@ -292,6 +292,93 @@ class TestParsing:
         assert "status" not in ack
 
 
+class TestOrderSubmission:
+    """Darwin answers a limit order with TRADCONFIRM and places nothing until
+    CONFORD arrives on the same connection. Verified against a live account:
+    confirming from a fresh session is refused with ERR 1010, so submit and
+    confirm cannot be split across two calls that each open their own socket."""
+
+    ORDER = "ACQAZ TEST1,ENI.MI,29,13.5"
+    CONFIRM = "CONFORD TEST1"
+
+    def responses(self, **overrides: object) -> dict[str, object]:
+        base = trading_responses()
+        base[self.ORDER] = [
+            "TRADCONFIRM;ENI.MI;TEST1;3003;ACQAZ;29;13.5;"
+            "VERIFICARE I DATI - ACQUISTO 29 A 13,5 EUR - Commissione prevista 0 EUR"
+        ]
+        base[self.CONFIRM] = ["TRADOK;ENI.MI;TEST1;3000;ACQAZ;29;13.5;"]
+        base.update(overrides)  # type: ignore[arg-type]
+        return base
+
+    def test_preview_submits_but_never_confirms(self) -> None:
+        with FakeDarwin(self.responses(), push=[STATUS]) as fake:
+            with trading_client(fake) as api:
+                result = api.place_limit_order(
+                    "ENI.MI", "buy", 29, 13.5, "TEST1", confirm=False
+                )
+        assert result["on_market"] is False
+        assert result["confirmation_was_required"] is True
+        assert result["confirmed"] is None
+        assert self.ORDER in fake.received
+        assert self.CONFIRM not in fake.received
+
+    def test_preview_returns_darwins_commission_disclosure(self) -> None:
+        """The only route to commission figures: no dAPI command reports them."""
+        with FakeDarwin(self.responses(), push=[STATUS]) as fake:
+            with trading_client(fake) as api:
+                result = api.place_limit_order(
+                    "ENI.MI", "buy", 29, 13.5, "TEST1", confirm=False
+                )
+        assert "Commissione prevista 0 EUR" in result["submitted"]["message"]
+
+    def test_place_confirms_on_the_same_connection(self) -> None:
+        with FakeDarwin(self.responses(), push=[STATUS]) as fake:
+            with trading_client(fake) as api:
+                result = api.place_limit_order(
+                    "ENI.MI", "buy", 29, 13.5, "TEST1", confirm=True
+                )
+        assert result["on_market"] is True
+        assert result["confirmed"]["accepted"] is True
+        # Order first, confirmation second, both within one session.
+        assert fake.received.index(self.ORDER) < fake.received.index(self.CONFIRM)
+
+    def test_order_live_without_a_confirmation_prompt_is_reported(self) -> None:
+        """If Darwin is configured not to ask, a plain TRADOK means the order is
+        already on the market — including when only a preview was intended."""
+        responses = self.responses(**{self.ORDER: ["TRADOK;ENI.MI;TEST1;3000;ACQAZ;29;13.5;"]})
+        with FakeDarwin(responses, push=[STATUS]) as fake:
+            with trading_client(fake) as api:
+                result = api.place_limit_order(
+                    "ENI.MI", "buy", 29, 13.5, "TEST1", confirm=False
+                )
+        assert result["on_market"] is True
+        assert result["confirmation_was_required"] is False
+        assert self.CONFIRM not in fake.received
+
+    def test_rejected_order_is_not_on_market(self) -> None:
+        responses = self.responses(
+            **{self.ORDER: ["TRADERR;ENI.MI;TEST1;1012;ACQAZ;29;13.5;rifiutato"]}
+        )
+        with FakeDarwin(responses, push=[STATUS]) as fake:
+            with trading_client(fake) as api:
+                result = api.place_limit_order(
+                    "ENI.MI", "buy", 29, 13.5, "TEST1", confirm=True
+                )
+        assert result["on_market"] is False
+        assert result["submitted"]["error_code"] == "1012"
+        assert self.CONFIRM not in fake.received
+
+    def test_refused_confirmation_leaves_the_order_off_market(self) -> None:
+        """What a stale confirmation looks like: ERR 1010 on CONFORD."""
+        responses = self.responses(**{self.CONFIRM: ["ERR;CONFORD;1010"]})
+        with FakeDarwin(responses, push=[STATUS]) as fake:
+            with trading_client(fake) as api:
+                with pytest.raises(dapi.DapiError) as caught:
+                    api.place_limit_order("ENI.MI", "buy", 29, 13.5, "TEST1", confirm=True)
+        assert caught.value.code == "1010"
+
+
 class TestDerivedValues:
     """Darwin reports no current price, so price and value are derived. The
     bond convention is the trap: getting it wrong is a 100x error in euro."""

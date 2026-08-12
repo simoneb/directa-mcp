@@ -10,11 +10,12 @@ the values in them are synthetic.
 
 ## Ports
 
-| Port  | Purpose                        |
+| Port  | Purpose (Directa''s own wording) |
 | ----- | ------------------------------ |
-| 10002 | Trading: account, portfolio, orders |
-| 10003 | Historical data: candles, ticks |
-| 10004 | Listening, not used here (real-time quote stream) |
+| 10001 | `DATAFEED` — real-time quotes. Not listening on our install, consistent with the entitlement being off |
+| 10002 | `TRADING` — account, portfolio, orders |
+| 10003 | `CHIAMATE STORICHE` — candles and ticks |
+| 10004 | *"porta di servizio (utilizzata esclusivamente per le nostre gestioni)"* — internal to Directa, not for developer use. It answers a connection with the same `DARWIN_STATUS` greeting, so it is easy to mistake for a usable port |
 
 Plain TCP, one line-oriented text command per request, `\r\n` terminated,
 latin-1. No handshake and no authentication: Darwin is already logged in, and
@@ -266,13 +267,79 @@ TBT;<ticker>;<data>;<ora>;<prezzo>;<quantità>
 Bulk responses end with `END CANDLES` / `END TBT`; candles are additionally
 preceded by `BEGIN CANDLES <ticker>`.
 
-## Order commands (unverified)
+## Orders are a two-step exchange, bound to the connection
 
-Not exercised: the only account available is `PROD`, with real positions and
-live orders. Syntax below is from Directa's
+Verified against a live account. `ACQAZ` does **not** place an order. Darwin
+answers `TRADCONFIRM` with code `3003`, and the order reaches the market only
+after `CONFORD` is sent for the same id:
+
+```
+> ACQAZ MCP1700000000,<ticker>,<qta>,<prezzo>
+TRADCONFIRM;<ticker>;MCP1700000000;3003;ACQAZ;<qta>;<prezzo>;LA INVITIAMO A VERIFICARE I DATI...
+```
+
+At that point nothing exists: `ORDERLIST` for the symbol returns no rows, the
+position is unchanged and liquidity is untouched.
+
+The crucial part is that **a pending confirmation does not outlive its
+connection**. Sending `CONFORD` on a new socket is refused:
+
+```
+> CONFORD MCP1700000000      (new connection)
+ERR;CONFORD;1010             ERR_TRADING_CMD_ERROR
+```
+
+Whether the confirmation is bound to the connection or simply expires after a
+few minutes is not distinguished by this observation — both were true of the
+attempt. Either way the consequence is the same: an order cannot be submitted
+and confirmed by two separate exchanges that each open their own connection.
+Any client that opens a connection per call, as this one does for reads, has to
+perform both steps inside a single call.
+
+This also makes the unconfirmed submit useful in its own right — see below.
+
+## Commissions: only obtainable by submitting an order
+
+No dAPI command reports commissions. Verified by probing `INFOCOMMISSION`,
+`INFOCOMMISSIONS`, `GETCOMMISSION`, `COMMISSION`, `INFOFEES`, `GETFEES`,
+`INFOCOSTS`, `INFOTARIFFE`, `INFOCONTRACT`, `INFOTRADES` and `TRADELIST` —
+all answer `1004` — and confirmed by Directa's documentation, which describes
+no such command on any port.
+
+The figures are nonetheless reachable, because the `TRADCONFIRM` message
+carries Darwin's full pre-trade disclosure: the instrument's matched name and
+market, the amount, the commission that would apply, the threshold rule behind
+it, and any conflict-of-interest note. Submitting a buy above the issuer's
+zero-commission threshold returned, in the message field:
+
+```
+LA INVITIAMO A VERIFICARE I DATI INSERITI PRIMA DI CONFERMARE L'INVIO
+DELL'ORDINE DI: ACQUISTO <nome completo strumento>, <mercato> - QUANTITA' <n>
+PREZZO <p> EUR  IMPORTO <controvalore> EUR  Commissione prevista 0 EUR
+Per ordini con controvalore eseguito pari o superiore a 1.000 EURO in acquisto
+non viene applicata commissione: <emittente> retrocede a Directa una fee fino
+ad un massimo di 7 euro ad eseguito. Potrebbe quindi verificarsi un conflitto
+d'interesse
+```
+
+The wording is verbatim apart from the placeholders, which stand in for the
+account's own instrument and figures. Note what the disclosure volunteers
+beyond the fee: the market the order would route to, and that the issuer pays
+Directa a rebate per execution.
+
+So a submit that is deliberately left unconfirmed is a genuine pre-trade quote:
+it discloses the cost and places nothing. Two caveats. The threshold applies to
+the **executed** value, not the submitted one, so a partial fill can fall below
+it. And this is only safe while Darwin is configured to ask for confirmation —
+if it answers `TRADOK` instead, the order is already live.
+
+## Order commands
+
+Syntax below is from Directa's
 [official dAPI documentation](https://app1.directatrading.com/trading-api-directa/index.html),
 corroborated by the `operation` field of `ORDER` lines placed through Darwin's
-own UI (`VENAZ` for a sell limit).
+own UI (`VENAZ` for a sell limit). `ACQAZ` and `CONFORD` are verified; the
+others are not.
 
 ```
 ACQAZ <id>,<ticker>,<quantità>,<prezzo>     buy limit
@@ -304,7 +371,7 @@ Two details worth noting:
   the order fills immediately — so it is not always a plain number.
 
 A `TRADCONFIRM` means the order is **not** on the market until `CONFORD` is sent
-for the same id.
+for the same id, on the same connection — see above.
 
 ## There is no simulated mode
 

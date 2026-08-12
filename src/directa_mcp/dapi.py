@@ -746,24 +746,93 @@ class TradingClient:
         line = self._conn.request_single(command, self._ORDER_ACKS, timeout=self._timeout)
         return parse_order_ack(line)
 
+    def _submit(self, command: str, order_id: str, confirm: bool) -> dict[str, Any]:
+        """Send an order command and, when Darwin asks for confirmation, answer
+        it on this same connection.
+
+        The connection matters. Darwin replies to a limit order with
+        TRADCONFIRM, and the order is not on the market until CONFORD is sent
+        for the same id — but a pending confirmation does not outlive the
+        connection that produced it. Confirming from a fresh session is refused
+        with ERR 1010, verified against a live account. So an order cannot be
+        submitted and confirmed by two separate calls that each open their own
+        connection; both steps have to happen here.
+
+        Returns both stages and, most importantly, `on_market`: whether the
+        order actually reached the market. Never infer that from the absence of
+        an error — an unconfirmed TRADCONFIRM is a successful exchange that
+        placed nothing.
+        """
+        submitted = self._order_command(command)
+
+        if not submitted.get("confirmation_required"):
+            # Darwin accepted or rejected outright. If confirmation prompts are
+            # switched off in Darwin, a plain TRADOK here means the order is
+            # already live, whatever `confirm` asked for.
+            return {
+                "submitted": submitted,
+                "confirmed": None,
+                "on_market": bool(submitted.get("accepted")),
+                "confirmation_was_required": False,
+            }
+
+        if not confirm:
+            return {
+                "submitted": submitted,
+                "confirmed": None,
+                "on_market": False,
+                "confirmation_was_required": True,
+            }
+
+        confirmed = self._order_command(f"CONFORD {order_id}")
+        return {
+            "submitted": submitted,
+            "confirmed": confirmed,
+            "on_market": bool(confirmed.get("accepted")),
+            "confirmation_was_required": True,
+        }
+
     def place_limit_order(
-        self, symbol: str, side: str, quantity: int, price: float, order_id: str
+        self,
+        symbol: str,
+        side: str,
+        quantity: int,
+        price: float,
+        order_id: str,
+        confirm: bool = True,
     ) -> dict[str, Any]:
-        """ACQAZ/VENAZ <id>,<ticker>,<quantità>,<prezzo>"""
+        """ACQAZ/VENAZ <id>,<ticker>,<quantità>,<prezzo>
+
+        With confirm=False the order is submitted but left unconfirmed, so
+        nothing reaches the market and Darwin's pre-trade disclosure — the
+        instrument's full name, the amount, the commission that would apply —
+        comes back in the acknowledgement. That is the only way this API
+        reveals commissions; no command reports them.
+        """
         prefix = {"buy": "ACQAZ", "sell": "VENAZ"}[side.lower()]
-        return self._order_command(f"{prefix} {order_id},{symbol},{quantity},{price}")
+        return self._submit(
+            f"{prefix} {order_id},{symbol},{quantity},{price}", order_id, confirm
+        )
 
     def modify_order(
-        self, order_id: str, price: float, signal_price: float | None = None
+        self,
+        order_id: str,
+        price: float,
+        signal_price: float | None = None,
+        confirm: bool = True,
     ) -> dict[str, Any]:
         """MODORD <id>,<prezzo>[,<prezzo segnale>]"""
         command = f"MODORD {order_id},{price}"
         if signal_price is not None:
             command += f",{signal_price}"
-        return self._order_command(command)
+        return self._submit(command, order_id, confirm)
 
     def confirm_order(self, order_id: str) -> dict[str, Any]:
-        """CONFORD <id> — the second step after a TRADCONFIRM."""
+        """CONFORD <id> — the second step after a TRADCONFIRM.
+
+        Only usable on the connection that received the TRADCONFIRM, which is
+        why it is not exposed as a tool of its own: see _submit.
+        """
         return self._order_command(f"CONFORD {order_id}")
 
     def cancel_order(self, order_id: str) -> dict[str, Any]:
