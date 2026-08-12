@@ -1,13 +1,17 @@
 [build-system]
-requires = ["setuptools>=69", "wheel"]
+# 77 or newer for PEP 639 licence metadata (the `license` SPDX expression and
+# `license-files`), which older setuptools ignores or rejects.
+requires = ["setuptools>=77", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
 name = "directa-mcp"
-version = "0.1.0"
+version = "0.2.1"
 description = "MCP server exposing Directa SIM's Darwin API (dAPI) as tools for Claude"
 readme = "README.md"
 requires-python = ">=3.11"
+license = "MIT"
+license-files = ["LICENSE"]
 authors = [
   { name = "Simone Busoli" }
 ]
