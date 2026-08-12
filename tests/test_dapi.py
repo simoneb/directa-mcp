@@ -209,6 +209,29 @@ class TestErrors:
                 with trading_client(fake):
                     pass
 
+    def test_transient_flowpoint_failure_is_retried(self) -> None:
+        """Darwin intermittently leaves FLOWPOINT unanswered when connections
+        arrive back to back — a timeout in practice, simulated here as a refusal
+        since both take the same retry path. The retry has to reuse the socket:
+        reconnecting would replay the whole opening snapshot and make the
+        congestion worse."""
+        responses = trading_responses()
+        attempts = {"n": 0}
+
+        def flowpoint(_command: str) -> list[str]:
+            attempts["n"] += 1
+            return ["ERR;FLOWPOINT;1004"] if attempts["n"] == 1 else ["FLOWPOINT;TRUE"]
+
+        responses["FLOWPOINT TRUE"] = flowpoint
+        with FakeDarwin(responses, push=[STATUS], accept_repeatedly=True) as fake:
+            with trading_client(fake) as api:
+                assert api.flowpoint is True
+                assert len(api.positions()) == 15
+        # Asked twice, and on the same connection: reconnecting would replay
+        # Darwin's whole opening snapshot.
+        assert attempts["n"] == 2
+        assert fake.connections == 1
+
     def test_missing_end_marker_times_out_rather_than_truncating(self) -> None:
         responses = trading_responses(INFOSTOCKS=["BEGIN STOCKLIST", *STOCKS])
         with FakeDarwin(responses, push=[STATUS]) as fake:
@@ -290,6 +313,20 @@ class TestParsing:
         """Acks use a 3000 series; 2000-series labels would be wrong here."""
         ack = dapi.parse_order_ack("TRADOK;STLAM;ORD001;3000;ACQAZ;10;4.75;")
         assert "status" not in ack
+
+    def test_numeric_trailing_field_is_an_execution_price(self) -> None:
+        """Documented as an error description, but a live TRADOK carries 0.0
+        there for an order accepted and not yet executed."""
+        ack = dapi.parse_order_ack("TRADOK;ENI.MI;ORD001;3000;ACQAZ;10;13.5;0.0")
+        assert ack["executed_price"] == 0.0
+        assert ack["message"] is None
+
+    def test_textual_trailing_field_stays_a_message(self) -> None:
+        ack = dapi.parse_order_ack(
+            "TRADCONFIRM;ENI.MI;ORD001;3003;ACQAZ;10;13.5;VERIFICARE I DATI"
+        )
+        assert ack["message"] == "VERIFICARE I DATI"
+        assert ack["executed_price"] is None
 
 
 class TestOrderSubmission:

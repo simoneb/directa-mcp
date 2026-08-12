@@ -125,6 +125,13 @@ END ORDERLIST
 This client enables it on connect and refuses to run without it, rather than
 guessing where a portfolio ends.
 
+One caveat found the hard way: when connections arrive in quick succession —
+several tool calls back to back, each opening its own socket — Darwin sometimes
+leaves `FLOWPOINT TRUE` unanswered until well past a few seconds. Two calls in
+ten failed that way. Reconnecting makes it worse, because every connection
+replays the entire portfolio and order snapshot first. Asking again on the same
+connection clears it.
+
 ## Response formats
 
 ```
@@ -362,13 +369,52 @@ TRADERR;<ticker>;<id>;<codice errore>;<comando>;<qta>;<prezzo>;<descrizione>
 TRADCONFIRM;<ticker>;<id>;3003;<tipo operazione>;<qta>;<prezzo>;<messaggio>
 ```
 
-Two details worth noting:
+Details worth noting:
 
-- Ack codes are a **3000 series** (`3003` = confirmation required), distinct
-  from the 2000-series order states of an `ORDER` line. Decoding one against
-  the other's table produces a confidently wrong label.
+- Ack codes are a **3000 series**, distinct from the 2000-series order states of
+  an `ORDER` line; decoding one against the other's table produces a confidently
+  wrong label. Observed: `3000` on an accepted new order, `3002` on an accepted
+  modify or cancel, `3003` asking for confirmation.
 - The quantity field is documented as `richiesta|eseguita`, a pair when part of
   the order fills immediately — so it is not always a plain number.
+- The trailing field is documented as `<DESCRIZIONE ERRORE>`, but a `TRADOK` for
+  an order accepted and not yet executed carries `0.0` there, which reads as an
+  execution price. The client reports a numeric value as `executed_price` and
+  anything else as `message`.
+
+### Only submission needs confirming
+
+`MODORD` and `REVORD` answer `TRADOK;…;3002` directly — no `TRADCONFIRM`, no
+second step. The two-phase dance applies to submitting a new order, not to
+changing or cancelling one.
+
+### A modify is a cancel-and-replace that reuses the id
+
+After `MODORD`, `ORDERLIST` holds **two rows carrying the same order id**: the
+previous price marked `2004` (revoked) and the new price `2000` (working).
+
+```
+ORDER;<ticker>;<ora>;MCP1700000000;ACQAZ;30.0;0.0;35;2004
+ORDER;<ticker>;<ora>;MCP1700000000;ACQAZ;29.5;0.0;35;2000
+```
+
+So **`order_id` is not unique in `ORDERLIST`** — there is one row per state
+transition, and filtering by id can return several. Take the one whose status is
+live, or use `ORDERLISTPENDING`. This also explains order lists that look
+duplicated: an id appearing twice at different prices is one order that was
+modified, not two orders.
+
+### Where a working order shows up, and where it does not
+
+A resting buy order does **not** reduce the liquidity that `INFOACCOUNT` or
+`INFOAVAILABILITY` report: with a four-figure buy working, both figures were
+unchanged to the cent. Committed funds are not visible there, so liquidity
+alone overstates what is actually free.
+
+The position does show it. `INFOSTOCKS` reported `quantity_trading` of `35` for
+the pending buy, and `-20000` for a working sell on another instrument — the
+**sign gives the direction**, and this field is the place to look for exposure
+committed to open orders. Cancelling the order returned it to `0`.
 
 A `TRADCONFIRM` means the order is **not** on the market until `CONFORD` is sent
 for the same id, on the same connection — see above.

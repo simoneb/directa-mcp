@@ -467,12 +467,13 @@ def parse_order_ack(line: str) -> dict[str, Any]:
     TRADCONFIRM means Darwin wants an explicit CONFORD before the order
     reaches the market, so `accepted` stays False until that second step.
 
-    Ack codes are a 3000 series (3003 = confirmation required) and are *not*
-    the 2000-series order states of an ORDER line, so they are reported as-is
-    rather than decoded against the wrong table. Parsing is deliberately
-    lenient: this is unverified against live Darwin — no order was ever
-    submitted from here — and the documented example is internally
-    inconsistent about its trailing fields.
+    Ack codes are a 3000 series and are *not* the 2000-series order states of an
+    ORDER line, so they are reported as-is rather than decoded against the wrong
+    table. Observed against a live account: 3000 on an accepted new order, 3002
+    on an accepted modify or cancel, 3003 asking for confirmation.
+
+    Parsing stays lenient because the documented format and what arrives do not
+    fully agree — see the trailing field below.
     """
     p = line.split(";")
     kind = p[0] if p else ""
@@ -485,9 +486,21 @@ def parse_order_ack(line: str) -> dict[str, Any]:
         "code": p[3].strip() if len(p) > 3 else None,
         "command": p[4] if len(p) > 4 else None,
         "price": _number(p[6]) if len(p) > 6 else None,
-        "message": p[7] if len(p) > 7 else None,
         "raw": line,
     }
+
+    # Directa documents the last field as <DESCRIZIONE ERRORE>, but a TRADOK for
+    # an accepted-not-yet-executed order carries `0.0` there, which reads as an
+    # execution price rather than a description. Rather than force one meaning,
+    # a numeric value is reported as executed_price and anything else as text.
+    trailing = p[7] if len(p) > 7 else None
+    numeric = _number(trailing) if trailing else None
+    if isinstance(numeric, (int, float)):
+        ack["executed_price"] = numeric
+        ack["message"] = None
+    else:
+        ack["executed_price"] = None
+        ack["message"] = trailing
 
     # The quantity field is documented as "richiesta|eseguita" — a pair when
     # part of the order filled immediately.
@@ -605,26 +618,68 @@ class TradingClient:
         self.startup_lines: list[str] = []
         self.flowpoint = False
 
+    #: Darwin sometimes leaves FLOWPOINT unanswered when connections arrive in
+    #: quick succession — observed with several tool calls running back to back,
+    #: each opening its own socket. It is a timeout rather than a refusal, so the
+    #: command is simply asked again on the *same* connection: reconnecting would
+    #: make things worse, since every connection replays the whole portfolio and
+    #: order snapshot before anything else can happen.
+    _FLOWPOINT_ATTEMPTS = 3
+    _FLOWPOINT_TIMEOUT = 8.0
+    #: A dropped connection is worth one fresh attempt.
+    _CONNECT_ATTEMPTS = 2
+
     def __enter__(self) -> "TradingClient":
+        last_error: Exception | None = None
+        for attempt in range(self._CONNECT_ATTEMPTS):
+            if attempt:
+                time.sleep(0.5)
+            try:
+                self._handshake()
+                return self
+            except (DapiConnectionError, DapiError, DapiTimeout) as exc:
+                last_error = exc
+                self._conn.close()
+        raise DapiConnectionError(f"dAPI handshake failed: {last_error}")
+
+    def _handshake(self) -> None:
+        """Connect, clear Darwin's opening push, and turn on list framing.
+
+        Raises rather than returning a half-usable client: without FLOWPOINT
+        there is no reliable end to a list response, and guessing where a
+        portfolio ends is how rows get silently dropped.
+        """
         self._conn.connect()
         # Darwin greets with DARWIN_STATUS then pushes the whole portfolio and
         # order list. Read it out of the way so it cannot be mistaken for the
         # response to the first command.
         self.startup_lines = self._conn.drain(idle=self._startup_idle)
-        try:
-            self.flowpoint = self._conn.request_single(
-                "FLOWPOINT TRUE", "FLOWPOINT", timeout=self._timeout
-            ).split(";")[1].strip().upper() == "TRUE"
-        except (DapiError, DapiTimeout):
-            self.flowpoint = False
-        if not self.flowpoint:
-            self._conn.close()
-            raise DapiConnectionError(
-                "Darwin refused FLOWPOINT TRUE, so list responses arrive without "
-                "BEGIN/END markers and cannot be read reliably. Refusing to "
-                "guess where a portfolio or order list ends."
-            )
-        return self
+
+        last_error: Exception | None = None
+        for attempt in range(self._FLOWPOINT_ATTEMPTS):
+            try:
+                reply = self._conn.request_single(
+                    "FLOWPOINT TRUE", "FLOWPOINT", timeout=self._FLOWPOINT_TIMEOUT
+                )
+            except (DapiTimeout, DapiError) as exc:
+                # Either Darwin was busy — most likely still pushing its
+                # snapshot, which is what we have actually observed — or it
+                # refused outright. Both pass; ask again on this connection
+                # rather than starting over.
+                last_error = exc
+                continue
+            fields = reply.split(";")
+            if len(fields) > 1 and fields[1].strip().upper() == "TRUE":
+                self.flowpoint = True
+                return
+            last_error = DapiConnectionError(f"FLOWPOINT answered {reply!r}")
+
+        self.flowpoint = False
+        raise DapiConnectionError(
+            f"Darwin did not enable FLOWPOINT after {self._FLOWPOINT_ATTEMPTS} "
+            f"attempts, so list responses would arrive without BEGIN/END markers "
+            f"and could not be read reliably. Last failure: {last_error}"
+        )
 
     def __exit__(self, *exc_info: object) -> None:
         self._conn.close()

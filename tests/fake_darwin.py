@@ -30,11 +30,18 @@ class FakeDarwin:
         responses: dict[str, Response] | None = None,
         push: Sequence[str] = (),
         chunk_size: int | None = None,
+        accept_repeatedly: bool = False,
     ) -> None:
         self.responses: dict[str, Response] = dict(responses or {})
         self.push = list(push)
         self.chunk_size = chunk_size
+        #: Keep serving after a client disconnects, so a client that retries its
+        #: handshake on a fresh connection can be tested.
+        self.accept_repeatedly = accept_repeatedly
         self.received: list[str] = []
+        #: How many connections were accepted, so a test can assert that a retry
+        #: reused the socket instead of opening a new one.
+        self.connections = 0
         #: Lines to inject just before the next response, simulating a pushed
         #: update landing between a command and its reply.
         self.inject_before_next: list[str] = []
@@ -72,32 +79,42 @@ class FakeDarwin:
             time.sleep(0.002)
 
     def _serve(self) -> None:
-        try:
-            conn, _ = self._listener.accept()
-        except OSError:
-            return
-        with conn:
-            if self.push:
-                self._write(conn, self.push)
-            buffer = b""
-            while not self._stopping.is_set():
+        while not self._stopping.is_set():
+            try:
+                conn, _ = self._listener.accept()
+            except OSError:
+                return
+            self.connections += 1
+            with conn:
+                self._serve_one(conn)
+            if not self.accept_repeatedly:
+                return
+
+    def _serve_one(self, conn: socket.socket) -> None:
+        if self.push:
+            self._write(conn, self.push)
+        buffer = b""
+        while not self._stopping.is_set():
+            try:
+                chunk = conn.recv(4096)
+            except OSError:
+                return
+            if not chunk:
+                return
+            buffer += chunk
+            while b"\n" in buffer:
+                raw, buffer = buffer.split(b"\n", 1)
+                command = raw.decode("latin-1").strip()
+                if not command:
+                    continue
+                self.received.append(command)
+                if self.inject_before_next:
+                    self._write(conn, self.inject_before_next)
+                    self.inject_before_next = []
                 try:
-                    chunk = conn.recv(4096)
+                    self._write(conn, self._answer(command))
                 except OSError:
                     return
-                if not chunk:
-                    return
-                buffer += chunk
-                while b"\n" in buffer:
-                    raw, buffer = buffer.split(b"\n", 1)
-                    command = raw.decode("latin-1").strip()
-                    if not command:
-                        continue
-                    self.received.append(command)
-                    if self.inject_before_next:
-                        self._write(conn, self.inject_before_next)
-                        self.inject_before_next = []
-                    self._write(conn, self._answer(command))
 
     def _answer(self, command: str) -> Sequence[str]:
         response = self.responses.get(command)

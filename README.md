@@ -112,9 +112,11 @@ Testato contro **Darwin 2.5.1** su un conto reale (`PROD`), il 2026-08-12:
 - ✅ `get_orders`, incluso `pending_only`
 - ✅ Il gate sugli ordini: con `DIRECTA_ENABLE_ORDERS` non impostato i tool di trading non inviano nulla
 - ⚠️ Tool storici (`get_daily_candles`, `get_intraday_candles`, `get_candle_data_range`, `get_tick_data`): raggiungono Darwin e restituiscono correttamente l'errore, ma **non è stato possibile vedere dati reali** perché il conto di test non ha le quotazioni abilitate (`1032`). Il formato delle righe `CANDLE;`/`TBT;` viene dalla documentazione ed è da confermare.
-- ✅ `preview_limit_order`: verificato su conto reale. Restituisce la dichiarazione pre-trade di Darwin — commissione, importo, nome dello strumento, conflitto d'interesse — e **non piazza nulla** (`on_market: false`, portafoglio e liquidità invariati).
-- ⚠️ `place_limit_order`: il comando `ACQAZ` e la risposta `TRADCONFIRM` sono verificati; la **conferma** che porta l'ordine a mercato non è mai stata eseguita, quindi nessun ordine è mai entrato da qui.
-- ❌ `modify_order`, `cancel_order`, `cancel_all_orders`: non verificati. La sintassi viene dalla documentazione. Al primo uso reale verifica l'esito con `get_orders` invece di fidarti dell'ack.
+- ✅ `preview_limit_order`: restituisce la dichiarazione pre-trade di Darwin — commissione, importo, nome dello strumento, conflitto d'interesse — e **non piazza nulla** (`on_market: false`, portafoglio e liquidità invariati).
+- ✅ `place_limit_order`: ciclo completo verificato con un ordine reale. `ACQAZ` → `TRADCONFIRM 3003` → `CONFORD` → `TRADOK 3000`, ordine a mercato con stato `2000`, confermato rileggendo da Darwin.
+- ✅ `modify_order`: verificato. `MODORD` → `TRADOK 3002`, senza conferma. Darwin fa cancel-and-replace riusando lo stesso ID.
+- ✅ `cancel_order`: verificato. `REVORD` → `TRADOK 3002`, ordine a `2004 Revocato` e `quantity_trading` tornato a zero.
+- ❌ `cancel_all_orders`: **non verificato, deliberatamente**. È l''unica operazione che può toccare ordini non creati da noi: se il filtro per simbolo non funzionasse revocherebbe altro. Non è stata provata con ordini reali di terzi sul conto.
 
 ## Perché un client interno
 
