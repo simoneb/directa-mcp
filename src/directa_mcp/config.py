@@ -18,7 +18,13 @@ class Settings:
     trading_host: str
     trading_port: int
     historical_port: int
-    live_trading: bool
+    #: Whether the order tools may send anything to Darwin at all. There is no
+    #: simulated alternative — Directa provides no test account for API
+    #: development and the dAPI has no simulation command — so this is a safety
+    #: catch, not a mode switch: off, orders are impossible; on, they are real.
+    #: It lives in the server's environment specifically so that the model
+    #: driving the tools cannot change it.
+    orders_enabled: bool
 
 
 def load_settings() -> Settings:
@@ -26,7 +32,7 @@ def load_settings() -> Settings:
         trading_host=os.environ.get("DIRECTA_TRADING_HOST", "127.0.0.1"),
         trading_port=int(os.environ.get("DIRECTA_TRADING_PORT", "10002")),
         historical_port=int(os.environ.get("DIRECTA_HISTORICAL_PORT", "10003")),
-        live_trading=_bool_env("DIRECTA_LIVE_TRADING", False),
+        orders_enabled=_bool_env("DIRECTA_ENABLE_ORDERS", False),
     )
 
 

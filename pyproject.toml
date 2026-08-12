@@ -14,11 +14,10 @@ authors = [
 dependencies = [
   "mcp>=1.6.0,<2.0",
   "python-dotenv>=1.0,<2.0",
-  "directa-api-wrapper @ git+https://github.com/NiccoloSalvini/directa-api-python.git",
 ]
 
 [project.optional-dependencies]
-dev = []
+dev = ["pytest>=8.0,<9.0"]
 
 [project.scripts]
 directa-mcp = "directa_mcp.server:main"
