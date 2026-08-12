@@ -35,10 +35,12 @@ I test girano contro un finto Darwin su socket ([`tests/fake_darwin.py`](tests/f
 
 ### 1. Registra il server
 
+Non serve clonare il repository né gestire un virtualenv: `uvx` scarica il pacchetto, si procura un Python adeguato e lancia l'entry point in un ambiente isolato. Serve solo [uv](https://docs.astral.sh/uv/) installato.
+
 **Claude Code**, disponibile da qualsiasi directory:
 
 ```powershell
-claude mcp add directa --scope user -- D:\dev\trading\directa-mcp\.venv\Scripts\python.exe -m directa_mcp.server
+claude mcp add directa --scope user -- uvx --from "git+https://github.com/simoneb/directa-mcp@v0.1.0" directa-mcp
 ```
 
 **Claude Desktop** — aggiungi a `%APPDATA%\Claude\claude_desktop_config.json` e riavvia l'app:
@@ -47,8 +49,12 @@ claude mcp add directa --scope user -- D:\dev\trading\directa-mcp\.venv\Scripts\
 {
   "mcpServers": {
     "directa": {
-      "command": "D:\\dev\\trading\\directa-mcp\\.venv\\Scripts\\python.exe",
-      "args": ["-m", "directa_mcp.server"],
+      "command": "uvx",
+      "args": [
+        "--from",
+        "git+https://github.com/simoneb/directa-mcp@v0.1.0",
+        "directa-mcp"
+      ],
       "env": {
         "DIRECTA_ENABLE_ORDERS": "false"
       }
@@ -57,7 +63,15 @@ claude mcp add directa --scope user -- D:\dev\trading\directa-mcp\.venv\Scripts\
 }
 ```
 
-Il percorso al Python del venv deve essere assoluto: Claude Desktop avvia il processo con un ambiente proprio, senza il venv attivo.
+Il riferimento `@v0.1.0` è un tag, non un branch: pinna una versione precisa. Senza, ogni avvio prenderebbe l'ultimo commit di `master`, che su uno strumento che parla col tuo conto non è desiderabile. Per aggiornare, cambia il tag.
+
+**Finché il repository è privato** questo funziona solo su una macchina il cui `git` è già autenticato verso GitHub — per esempio via Git Credential Manager, o dopo `gh auth setup-git`. Verificato: `uvx` delega a `git`, che usa il credential helper, quindi non serve nessun token nel file di configurazione. Su una macchina non autenticata la risoluzione fallisce con un errore di accesso al repository.
+
+**Se preferisci lavorare dai sorgenti** (per sviluppare il server, non per usarlo) la strada resta quella del [Setup](#setup), e la registrazione punta al Python del venv con percorso assoluto — Claude Desktop avvia il processo con un ambiente proprio, senza il venv attivo:
+
+```powershell
+claude mcp add directa-dev --scope user -- D:\dev\trading\directa-mcp\.venv\Scripts\python.exe -m directa_mcp.server
+```
 
 ### 2. Avvia Darwin
 

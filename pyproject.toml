@@ -11,10 +11,27 @@ requires-python = ">=3.11"
 authors = [
   { name = "Simone Busoli" }
 ]
+keywords = ["mcp", "directa", "darwin", "dapi", "trading", "borsa-italiana"]
+classifiers = [
+  "Development Status :: 3 - Alpha",
+  "Environment :: Console",
+  "Intended Audience :: Financial and Insurance Industry",
+  "Operating System :: OS Independent",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: 3.13",
+  "Topic :: Office/Business :: Financial :: Investment",
+  "Private :: Do Not Upload",
+]
 dependencies = [
   "mcp>=1.6.0,<2.0",
   "python-dotenv>=1.0,<2.0",
 ]
+
+[project.urls]
+Repository = "https://github.com/simoneb/directa-mcp"
+"Protocol notes" = "https://github.com/simoneb/directa-mcp/blob/master/docs/PROTOCOL.md"
 
 [project.optional-dependencies]
 dev = ["pytest>=8.0,<9.0"]
