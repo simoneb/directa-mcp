@@ -197,6 +197,24 @@ identify what failed. Three codes need special handling:
   whatever command happens to be in flight.
 - **1032** — the datafeed entitlement, below.
 
+`1012` is worth its own note, because it constrains how orders can be tested at
+all. A limit too far from the current market is refused **at submission**, with
+`TRADERR` in place of the usual `TRADCONFIRM`:
+
+```
+> VENAZ <id>,XNAS,1,120.00              (market ~59.90)
+TRADERR;XNAS;<id>;1012;VENAZ;1;120.0000;...L'ORDINE NON PUO' ESSERE INOLTRATO
+PER SCOSTAMENTO DI PREZZO TROPPO ELEVATO RISPETTO AI VALORI DI MERCATO...
+```
+
+So an order priced deliberately absurdly, to guarantee it cannot execute, does
+not reach the book at all. Probed with unconfirmed submissions from +2% to +20%
+above market, every one was accepted; twice the market was refused. The exact
+threshold sits somewhere between, and 20% is enough to keep a test order off the
+market while still being accepted. Note the refusal still carries the full
+pre-trade disclosure, so a `1012` message reads much like a successful one —
+branch on the `TRADERR` prefix, not on the text.
+
 ## Historical data needs an entitlement
 
 Every command on port 10003 returned `ERR;<account>;1032` — *"DATAFEED NON
@@ -327,9 +345,24 @@ TRADCONFIRM;<ticker>;<id>;3003;<tipo operazione>;<qta>;<prezzo>;<messaggio>
 
 ### Only submission needs confirming
 
-`MODORD` and `REVORD` answer `TRADOK;…;3002` directly — no `TRADCONFIRM`, no
-second step. The two-phase dance applies to submitting a new order, not to
-changing or cancelling one.
+`MODORD`, `REVORD` and `REVALL` all answer `TRADOK;…;3002` directly — no
+`TRADCONFIRM`, no second step. The two-phase dance applies to submitting a new
+order, not to changing or cancelling one.
+
+`REVALL` is the odd one in what it names. Asked to cancel every order on a
+symbol, it replies with a single ack carrying the **order id it revoked**, not
+the symbol it was asked about:
+
+```
+> REVALL XNAS
+TRADOK;XNAS;MCPCA1786626827;3002;VENAZ;1;71.89;0.0
+```
+
+With one matching order that reads naturally, but it means the ack cannot tell
+you how many orders went, so the order list afterwards is the only answer to
+that. Verified with working orders on two symbols: `REVALL` on one left the
+other on the book, and `quantity_trading` returned to zero only on the symbol
+named.
 
 ### A modify is a cancel-and-replace that reuses the id
 

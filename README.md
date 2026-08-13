@@ -108,7 +108,7 @@ The flag is therefore a safety catch, not a mode selector. It lives in the MCP p
 
 With the flag on, orders are real, with real money.
 
-`cancel_all_orders` is deliberately unverified: it is the one operation that can touch orders this server did not create, so a broken symbol filter would revoke something else.
+`cancel_all_orders` is the one operation that can reach an order this server did not create, so its symbol filter was verified deliberately rather than assumed: two working orders on different symbols, `cancel_all_orders` on one, and the other still on the book afterwards.
 
 ## Starting Darwin
 
@@ -149,7 +149,7 @@ Because the OTP is mandatory, this server **cannot be automated unattended** —
 | `place_limit_order` | Buy/sell limit order, confirmed within the same connection | ✅ |
 | `modify_order` | Change the price of a working order | ✅ |
 | `cancel_order` | Cancel one order by id | ✅ |
-| `cancel_all_orders` | Cancel every order on a symbol | ❌ unverified by design |
+| `cancel_all_orders` | Cancel every order on a symbol | ✅ |
 | `get_daily_candles` | Daily OHLC candles | ⚠️ needs datafeed |
 | `get_intraday_candles` | Intraday candles, configurable period | ⚠️ needs datafeed |
 | `get_candle_data_range` | Candles over an explicit date range | ⚠️ needs datafeed |

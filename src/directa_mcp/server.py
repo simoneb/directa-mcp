@@ -39,9 +39,13 @@ enable, not as a bug or a transient error.
 Order tools are disabled unless the server was started with
 DIRECTA_ENABLE_ORDERS=true. When disabled they send nothing at all; there is no
 simulation fallback, so a disabled response never resembles a placed order.
-The order tools are also the one part of this server not verified against live
-Darwin — treat their first real use as a test, and confirm the outcome with
-get_orders rather than trusting the acknowledgement alone.""",
+Every order tool has been exercised against live Darwin, but an acknowledgement
+is still not an outcome: confirm what happened with get_orders rather than
+trusting the ack alone.
+
+Darwin refuses a limit too far from the current market with TRADERR 1012, so an
+order meant not to execute cannot simply be priced absurdly. Around 20% away is
+accepted; twice the market is not.""",
 )
 
 # Errors that mean "the request failed" rather than "the code is broken".
@@ -369,8 +373,14 @@ def cancel_order(order_id: str) -> dict[str, Any]:
 @tool(destructive=True, idempotent=True)
 def cancel_all_orders(symbol: str) -> dict[str, Any]:
     """Cancel every open order for a symbol. Confirm the symbol with the user
-    first — this affects orders the user may not have asked about. Same
-    order gate as place_limit_order."""
+    first — this affects orders the user may not have asked about. Same order
+    gate as place_limit_order.
+
+    The symbol filter is verified: with working orders on two symbols, this
+    revoked only the one named. Darwin answers `REVALL` with a single `TRADOK`
+    3002 that carries the id of the order it revoked, not the symbol asked
+    about, so read the resulting order list rather than the ack to learn what
+    went."""
     _require_orders_enabled()
     with trading_client() as api:
         return {"sent_to_darwin": True, "data": api.cancel_all_orders(symbol)}
