@@ -68,7 +68,7 @@ Pin a tag, not a branch — otherwise every start pulls the tip of `master`. Pre
 | `preview_limit_order` | What an order would cost, **without placing it** |
 | `place_limit_order`, `modify_order`, `cancel_order`, `cancel_all_orders` | Real orders. Need the gate below |
 | `start_darwin` | Launches dGO so you can log in. Needs `DIRECTA_AUTOSTART=true` |
-| `get_daily_candles`, `get_intraday_candles`, `get_candle_data_range`, `get_tick_data` | Need the datafeed entitlement |
+| `get_daily_candles`, `get_intraday_candles`, `get_candle_data_range`, `get_tick_data` | OHLC candles and ticks. Need the datafeed entitlement |
 
 Symbols use Directa's formats: `ENI.MI` for Borsa Italiana stocks, bare tickers for ETFs (`VWCE`), `M.<number>` for bonds. Read one back from `get_positions` rather than guessing.
 

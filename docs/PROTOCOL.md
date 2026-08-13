@@ -231,8 +231,9 @@ This matches the `FALSE` datafeed flag in `DARWIN_STATUS`. It is an account
 entitlement for real-time quotes, not a protocol or client problem — check
 `get_darwin_status().datafeed_enabled` before blaming anything else.
 
-Consequently the candle and tick formats come from documentation and are
-**unverified**:
+With the entitlement on, the third field of `DARWIN_STATUS` turns `TRUE` and both
+formats are as documented — including the unusual field order, where `close`
+precedes `low`, `high` and `open`:
 
 ```
 CANDLE;<ticker>;<data>;<ora>;<close>;<low>;<high>;<open>;<volume>
@@ -241,6 +242,13 @@ TBT;<ticker>;<data>;<ora>;<prezzo>;<quantità>
 
 Bulk responses end with `END CANDLES` / `END TBT`; candles are additionally
 preceded by `BEGIN CANDLES <ticker>`.
+
+Two things to know about candles. The period argument is honoured — the same day
+came back as 24 five-minute candles at `300` and 6 hourly ones at `3600` — and
+**buckets with no trades are absent rather than empty**, so consecutive candles
+are not evenly spaced and a gap means no volume, not missing data. `TBT` and
+`CANDLE` agree exactly: two ticks of 543 and 457 in one interval made that
+candle's volume of 1000.
 
 ## Orders are a two-step exchange, bound to the connection
 
