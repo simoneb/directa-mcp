@@ -3,6 +3,7 @@ import time
 from typing import Any, Callable, Literal
 
 from mcp.server.fastmcp import FastMCP
+from mcp.types import ToolAnnotations
 
 from . import launcher
 from .client import check_ports, historical_client, trading_client
@@ -73,37 +74,73 @@ def _require_autostart_enabled() -> None:
         )
 
 
-def tool(fn: Callable[..., dict[str, Any]]) -> Callable[..., dict[str, Any]]:
+def tool(
+    *,
+    read_only: bool = False,
+    destructive: bool = False,
+    idempotent: bool = False,
+) -> Callable[[Callable[..., dict[str, Any]]], Callable[..., dict[str, Any]]]:
     """Register an MCP tool whose `success` flag reflects what actually
     happened. Wrapping a failure as a successful call with the error buried in
     the payload — as the previous version did — makes a caller believe a reply
     it should not trust. A blocked order counts as a failure here for the same
-    reason: it must not read like an order that went through."""
+    reason: it must not read like an order that went through.
 
-    @functools.wraps(fn)
-    def wrapper(*args: Any, **kwargs: Any) -> dict[str, Any]:
-        try:
-            return {"success": True, **fn(*args, **kwargs)}
-        except OrdersDisabled as exc:
-            return {"success": False, "blocked": True, "sent_to_darwin": False, "error": str(exc)}
-        except AutostartDisabled as exc:
-            return {"success": False, "blocked": True, "launched": False, "error": str(exc)}
-        except LauncherError as exc:
-            return {"success": False, "launched": False, "error": str(exc)}
-        except DapiError as exc:
-            return {
-                "success": False,
-                "error": str(exc),
-                "error_code": exc.code,
-                "command": exc.command,
-            }
-        except _DAPI_ERRORS as exc:
-            return {"success": False, "error": f"{type(exc).__name__}: {exc}"}
+    Every tool also carries the protocol's own hints, which is what lets a
+    client sort them into permission groups instead of one undifferentiated
+    list. The classification is deliberately declared per tool rather than
+    guessed from the name: `get_*` reads and `cancel_*` writes, but
+    `preview_limit_order` reads like a query and still puts a command on the
+    wire, and a hint that flatters a tool is worse than no hint at all.
 
-    return mcp.tool()(wrapper)
+    `openWorldHint` is true for every tool here: they all reach Darwin, and
+    through it the market. It is sent explicitly rather than left to the
+    protocol's default, because an absent hint is the one a client is free to
+    read either way — and reading it as a closed world would make this server
+    look more self-contained than it is."""
+
+    #: The two hints below are defined as meaningful only where readOnlyHint is
+    #: false, so a read-only tool reports the settled pair rather than whatever
+    #: the caller happened to pass.
+    annotations = ToolAnnotations(
+        readOnlyHint=read_only,
+        destructiveHint=False if read_only else destructive,
+        idempotentHint=True if read_only else idempotent,
+        openWorldHint=True,
+    )
+
+    def register(fn: Callable[..., dict[str, Any]]) -> Callable[..., dict[str, Any]]:
+        @functools.wraps(fn)
+        def wrapper(*args: Any, **kwargs: Any) -> dict[str, Any]:
+            try:
+                return {"success": True, **fn(*args, **kwargs)}
+            except OrdersDisabled as exc:
+                return {
+                    "success": False,
+                    "blocked": True,
+                    "sent_to_darwin": False,
+                    "error": str(exc),
+                }
+            except AutostartDisabled as exc:
+                return {"success": False, "blocked": True, "launched": False, "error": str(exc)}
+            except LauncherError as exc:
+                return {"success": False, "launched": False, "error": str(exc)}
+            except DapiError as exc:
+                return {
+                    "success": False,
+                    "error": str(exc),
+                    "error_code": exc.code,
+                    "command": exc.command,
+                }
+            except _DAPI_ERRORS as exc:
+                return {"success": False, "error": f"{type(exc).__name__}: {exc}"}
+
+        return mcp.tool(annotations=annotations)(wrapper)
+
+    return register
 
 
-@tool
+@tool(read_only=True)
 def check_connection() -> dict[str, Any]:
     """Check whether Darwin's local trading and historical-data ports are
     reachable. Call this first if any other tool fails: it distinguishes
@@ -128,7 +165,7 @@ def _darwin_state(trading_port_reachable: bool) -> dict[str, Any]:
     )
 
 
-@tool
+@tool(destructive=False, idempotent=True)
 def start_darwin() -> dict[str, Any]:
     """Launch dGO, Directa's launcher, so the user can bring Darwin up. Needs
     the server to have been started with DIRECTA_AUTOSTART=true.
@@ -156,7 +193,7 @@ def start_darwin() -> dict[str, Any]:
     return {"launched": True, **started, "darwin": _darwin_state(False)}
 
 
-@tool
+@tool(read_only=True)
 def get_darwin_status() -> dict[str, Any]:
     """Get Darwin's connection status, release, and whether the real-time
     datafeed is enabled. Richer than check_connection since it goes through the
@@ -166,7 +203,7 @@ def get_darwin_status() -> dict[str, Any]:
         return {"data": api.darwin_status()}
 
 
-@tool
+@tool(read_only=True)
 def get_account_balance() -> dict[str, Any]:
     """Get raw account figures from dAPI INFOACCOUNT: liquidity, equity and two
     fields whose documented names do not match their contents.
@@ -181,7 +218,7 @@ def get_account_balance() -> dict[str, Any]:
         return {"data": api.account_info()}
 
 
-@tool
+@tool(read_only=True)
 def get_availability() -> dict[str, Any]:
     """Get buying power: cash available for stocks and derivatives, with and
     without margin (dAPI INFOAVAILABILITY). Use this rather than
@@ -190,7 +227,7 @@ def get_availability() -> dict[str, Any]:
         return {"data": api.availability()}
 
 
-@tool
+@tool(read_only=True)
 def get_positions() -> dict[str, Any]:
     """Get every open position in the portfolio, with quantity, average price
     and theoretical gain. Returns the complete list."""
@@ -199,7 +236,7 @@ def get_positions() -> dict[str, Any]:
         return {"count": len(positions), "data": positions}
 
 
-@tool
+@tool(read_only=True)
 def get_portfolio_overview() -> dict[str, Any]:
     """The whole picture in one call: every position with its current price and
     value, plus portfolio totals and P&L. Prefer this over get_positions when
@@ -216,14 +253,14 @@ def get_portfolio_overview() -> dict[str, Any]:
         return {"data": api.portfolio_overview()}
 
 
-@tool
+@tool(read_only=True)
 def get_position(symbol: str) -> dict[str, Any]:
     """Get a single position by symbol, as it appears in get_positions."""
     with trading_client() as api:
         return {"data": api.position(symbol)}
 
 
-@tool
+@tool(read_only=True)
 def get_orders(pending_only: bool = False, symbol: str | None = None) -> dict[str, Any]:
     """Get orders placed today with their state — "In negoziazione" (working),
     "Eseguito" (filled), "Revocato" (cancelled), and so on.
@@ -236,7 +273,7 @@ def get_orders(pending_only: bool = False, symbol: str | None = None) -> dict[st
         return {"count": len(orders), "data": orders}
 
 
-@tool
+@tool(destructive=False, idempotent=True)
 def preview_limit_order(
     symbol: str,
     side: Literal["buy", "sell"],
@@ -271,7 +308,7 @@ def preview_limit_order(
         }
 
 
-@tool
+@tool(destructive=True, idempotent=False)
 def place_limit_order(
     symbol: str,
     side: Literal["buy", "sell"],
@@ -305,7 +342,7 @@ def place_limit_order(
         }
 
 
-@tool
+@tool(destructive=True, idempotent=False)
 def modify_order(
     order_id: str, price: float, signal_price: float | None = None
 ) -> dict[str, Any]:
@@ -320,7 +357,7 @@ def modify_order(
         }
 
 
-@tool
+@tool(destructive=True, idempotent=True)
 def cancel_order(order_id: str) -> dict[str, Any]:
     """Cancel one open order by the order_id shown in get_orders. Same
     order gate as place_limit_order."""
@@ -329,7 +366,7 @@ def cancel_order(order_id: str) -> dict[str, Any]:
         return {"sent_to_darwin": True, "data": api.cancel_order(order_id)}
 
 
-@tool
+@tool(destructive=True, idempotent=True)
 def cancel_all_orders(symbol: str) -> dict[str, Any]:
     """Cancel every open order for a symbol. Confirm the symbol with the user
     first — this affects orders the user may not have asked about. Same
@@ -339,7 +376,7 @@ def cancel_all_orders(symbol: str) -> dict[str, Any]:
         return {"sent_to_darwin": True, "data": api.cancel_all_orders(symbol)}
 
 
-@tool
+@tool(read_only=True)
 def get_daily_candles(symbol: str, days: int = 30) -> dict[str, Any]:
     """Get daily OHLC candles for the last N days. Needs the real-time quote
     entitlement — without it this fails with code 1032."""
@@ -348,7 +385,7 @@ def get_daily_candles(symbol: str, days: int = 30) -> dict[str, Any]:
         return {"count": len(candles), "data": candles}
 
 
-@tool
+@tool(read_only=True)
 def get_intraday_candles(
     symbol: str, days: int = 5, period_minutes: int = 5
 ) -> dict[str, Any]:
@@ -359,7 +396,7 @@ def get_intraday_candles(
         return {"count": len(candles), "data": candles}
 
 
-@tool
+@tool(read_only=True)
 def get_candle_data_range(
     symbol: str, start_date: str, end_date: str, period_seconds: int = 60
 ) -> dict[str, Any]:
@@ -371,7 +408,7 @@ def get_candle_data_range(
         return {"count": len(candles), "data": candles}
 
 
-@tool
+@tool(read_only=True)
 def get_tick_data(symbol: str, days: int = 1) -> dict[str, Any]:
     """Get tick-by-tick trades over the last N days. Can be very large — prefer
     get_intraday_candles beyond a single session. Needs the real-time quote
