@@ -35,7 +35,7 @@ jobs:
         with:
           python-version: '3.13'
       # Same explicit environment as ci.yml, for the same two reasons.
-      - run: uv venv
+      - run: uv venv --allow-existing
       - run: uv pip install -e ".[dev]"
       - run: uv run pytest -q
 

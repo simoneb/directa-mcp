@@ -21,11 +21,12 @@ jobs:
       - uses: astral-sh/setup-uv@v5
         with:
           python-version: ${{ matrix.python }}
-      # The environment is created explicitly rather than installed into with
-      # --system: uv's own managed interpreters are marked externally managed
-      # and refuse it, and on Windows a --system install puts pytest somewhere
-      # the shell's PATH does not reach. `uv run` then resolves the venv on
-      # both runners without either of them needing an activation step.
-      - run: uv venv
+      # Installing with --system was wrong on both runners: uv's own managed
+      # interpreters are marked externally managed and refuse it, and on Windows
+      # it puts pytest outside the PATH the shell searches. The venv is what to
+      # install into instead — setup-uv already provisions one, hence
+      # --allow-existing, which also keeps this working if it stops doing so.
+      # `uv run` then finds it without a per-shell activation step.
+      - run: uv venv --allow-existing
       - run: uv pip install -e ".[dev]"
       - run: uv run pytest -q
