@@ -73,9 +73,15 @@ jobs:
           BUMP: ${{ inputs.bump }}
           EXPLICIT: ${{ inputs.version }}
           PUSHED_TAG: ${{ github.ref_name }}
+        # Outputs are written to $GITHUB_OUTPUT from inside the script, not by
+        # redirecting it: git prints to stdout too, and its "[master abc] Release
+        # 0.3.1" lands in the output file as an invalid line.
         run: |
-          python - <<'PY' >> "$GITHUB_OUTPUT"
+          python - <<'PY'
           import os, pathlib, re, subprocess
+
+          out = pathlib.Path(os.environ["GITHUB_OUTPUT"]).open("a")
+          emit = lambda **kw: [print(f"{k}={v}", file=out) for k, v in kw.items()]
 
           pyproject = pathlib.Path("pyproject.toml")
           text = pyproject.read_text(encoding="utf-8")
@@ -90,8 +96,7 @@ jobs:
                   raise SystemExit(
                       f"::error::tag v{version} does not match pyproject version {current}"
                   )
-              print(f"tag=v{version}")
-              print(f"version={version}")
+              emit(tag=f"v{version}", version=version)
               raise SystemExit(0)
 
           explicit = os.environ.get("EXPLICIT", "").strip().removeprefix("v")
@@ -134,8 +139,7 @@ jobs:
           run("git", "tag", "-a", tag, "-m", f"directa-mcp {version}")
           run("git", "push", "--follow-tags")
 
-          print(f"tag={tag}")
-          print(f"version={version}")
+          emit(tag=tag, version=version)
           PY
 
   build:
