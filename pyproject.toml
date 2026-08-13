@@ -6,7 +6,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "directa-mcp"
-version = "0.2.1"
+version = "0.3.0"
 description = "MCP server exposing Directa SIM's Darwin API (dAPI) as tools for Claude"
 readme = "README.md"
 requires-python = ">=3.11"
