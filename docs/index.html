@@ -150,7 +150,7 @@
 
 <script>
 const REPO = "simoneb/directa-mcp";
-const FALLBACK = "v0.3.2";
+const FALLBACK = "<TAG>";  // se l'API non risponde, meglio un segnaposto che una versione vecchia in silenzio
 
 const tarball = tag => `https://github.com/${REPO}/archive/refs/tags/${tag}.tar.gz`;
 
@@ -196,7 +196,11 @@ fetch(`https://api.github.com/repos/${REPO}/releases/latest`)
     const asset = (r.assets || []).find(a => a.name.endsWith(".mcpb"));
     render(r.tag_name, r.published_at, asset && asset.browser_download_url);
   })
-  .catch(() => render(FALLBACK, null, null));
+  .catch(() => {
+    render(FALLBACK, null, null);
+    document.getElementById("rel-date").textContent =
+      "could not reach GitHub — take the tag from the releases page";
+  });
 
 document.querySelectorAll("[data-copy]").forEach(btn => {
   btn.addEventListener("click", async () => {
