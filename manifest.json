@@ -1,0 +1,55 @@
+{
+  "manifest_version": "0.4",
+  "name": "directa-mcp",
+  "display_name": "Directa (Darwin dAPI)",
+  "version": "0.3.2",
+  "description": "Positions, balance, orders and historical data from Directa SIM's Darwin platform.",
+  "long_description": "Exposes Directa SIM's Darwin API (dAPI) as MCP tools: positions with derived prices and a reconciliation check, account balance and buying power, the day's orders, and OHLC candles and ticks. Darwin must be running and logged in on this machine — the extension talks to its local sockets, never to Directa over the internet. Order tools stay inert unless you enable them below.",
+  "author": {
+    "name": "Simone Busoli",
+    "url": "https://github.com/simoneb"
+  },
+  "homepage": "https://simoneb.github.io/directa-mcp/",
+  "documentation": "https://github.com/simoneb/directa-mcp#readme",
+  "support": "https://github.com/simoneb/directa-mcp/issues",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/simoneb/directa-mcp"
+  },
+  "keywords": ["directa", "darwin", "dapi", "trading", "borsa-italiana"],
+  "license": "MIT",
+  "server": {
+    "type": "uv",
+    "entry_point": "src/directa_mcp/server.py",
+    "mcp_config": {
+      "command": "uv",
+      "args": ["run", "--directory", "${__dirname}", "python", "-m", "directa_mcp.server"],
+      "env": {
+        "DIRECTA_ENABLE_ORDERS": "${user_config.enable_orders}",
+        "DIRECTA_AUTOSTART": "${user_config.autostart}"
+      }
+    }
+  },
+  "user_config": {
+    "enable_orders": {
+      "type": "boolean",
+      "title": "Allow real orders",
+      "description": "Off by default. While off, the tools that place, modify or cancel orders send nothing at all to Darwin. There is no simulated mode: with this on, orders are real, with real money.",
+      "default": false
+    },
+    "autostart": {
+      "type": "boolean",
+      "title": "Allow starting Darwin",
+      "description": "Lets the start_darwin tool launch dGO so you can log in. It never completes the login by itself — Darwin asks for an OTP — and it never closes Darwin.",
+      "default": false
+    }
+  },
+  "tools_generated": true,
+  "compatibility": {
+    "claude_desktop": ">=0.10.0",
+    "platforms": ["darwin", "win32"],
+    "runtimes": {
+      "python": ">=3.11"
+    }
+  }
+}

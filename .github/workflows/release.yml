@@ -87,6 +87,16 @@ jobs:
           text = pyproject.read_text(encoding="utf-8")
           current = re.search(r'^version = "(.+?)"', text, re.M).group(1)
 
+          # The bundle manifest carries its own version, and Claude Desktop shows
+          # that one. Two places to keep in step, so neither is edited by hand.
+          manifest = pathlib.Path("manifest.json")
+          manifest_text = manifest.read_text(encoding="utf-8")
+          manifest_version = re.search(r'"version": "(.+?)"', manifest_text).group(1)
+          if manifest_version != current:
+              raise SystemExit(
+                  f"::error::manifest.json is {manifest_version} but pyproject is {current}"
+              )
+
           if os.environ["EVENT"] == "push":
               # The tag is the claim; pyproject has to back it up. Releasing a
               # package that reports a version other than its tag is a bug this
@@ -128,6 +138,10 @@ jobs:
               text.replace(f'version = "{current}"', f'version = "{version}"', 1),
               encoding="utf-8",
           )
+          manifest.write_text(
+              manifest_text.replace(f'"version": "{current}"', f'"version": "{version}"', 1),
+              encoding="utf-8",
+          )
 
           # [skip ci] because the push-to-master CI run would only re-test what
           # this workflow just tested, one commit earlier.
@@ -151,10 +165,22 @@ jobs:
           ref: ${{ needs.prepare.outputs.tag }}
       - uses: astral-sh/setup-uv@v5
       - run: uv build
+      # The one-click extension for Claude Desktop. Only the manifest and the
+      # sources go in: server.type "uv" means the host resolves dependencies from
+      # pyproject rather than the bundle shipping them.
+      - run: npm install -g @anthropic-ai/mcpb
+      - run: mcpb validate manifest.json
+      # Kept out of dist/ deliberately: the PyPI job publishes everything in
+      # there, and a .mcpb is not a Python distribution.
+      - run: mcpb pack . "bundle/directa-mcp-${{ needs.prepare.outputs.version }}.mcpb"
       - uses: actions/upload-artifact@v4
         with:
           name: dist
           path: dist/
+      - uses: actions/upload-artifact@v4
+        with:
+          name: bundle
+          path: bundle/
 
   github-release:
     needs: [prepare, build]
@@ -170,6 +196,10 @@ jobs:
         with:
           name: dist
           path: dist/
+      - uses: actions/download-artifact@v4
+        with:
+          name: bundle
+          path: bundle/
       # The notes are the commit subjects since the previous tag. The install
       # snippet is spelled out because the README deliberately carries no version
       # number — this is where a reader finds the tag to paste.
@@ -180,7 +210,9 @@ jobs:
         run: |
           previous=$(git tag --sort=-version:refname | grep -A1 -x "$TAG" | tail -n1)
           {
-            echo "Register the server with:"
+            echo "**Claude Desktop:** download the \`.mcpb\` below and double-click it."
+            echo
+            echo "Everywhere else:"
             echo
             echo '```'
             echo "uvx --from \"https://github.com/${GITHUB_REPOSITORY}/archive/refs/tags/${TAG}.tar.gz\" directa-mcp"
@@ -194,7 +226,7 @@ jobs:
               git log --no-merges --pretty='- %s' "$TAG"
             fi
           } > notes.md
-          gh release create "$TAG" dist/* --title "$TAG" --notes-file notes.md
+          gh release create "$TAG" dist/* bundle/* --title "$TAG" --notes-file notes.md
 
   pypi:
     needs: build

@@ -1,0 +1,211 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>directa-mcp</title>
+<meta name="description" content="MCP server exposing Directa SIM's Darwin API (dAPI) — positions, balance, orders, historical data.">
+<style>
+  :root {
+    --bg: #fbfaf8; --fg: #1c1b19; --muted: #6b6862; --line: #e3dfd8;
+    --card: #ffffff; --accent: #7a4b2a; --warn-bg: #fdf5ec; --warn-line: #e0c9a8;
+    --code-bg: #f4f1ec;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #171614; --fg: #eae7e1; --muted: #9b968d; --line: #2e2c28;
+      --card: #1e1d1a; --accent: #d59b6a; --warn-bg: #241d14; --warn-line: #4a3a24;
+      --code-bg: #232120;
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; padding: 3rem 1.25rem 5rem; background: var(--bg); color: var(--fg);
+    font: 16px/1.6 ui-sans-serif, -apple-system, "Segoe UI", system-ui, sans-serif;
+  }
+  main { max-width: 46rem; margin: 0 auto; }
+  h1 { font-size: 1.9rem; margin: 0 0 .3rem; letter-spacing: -.02em; }
+  h2 { font-size: 1.1rem; margin: 2.5rem 0 .75rem; letter-spacing: -.01em; }
+  p, li { color: var(--fg); }
+  .lede { color: var(--muted); margin: 0 0 .5rem; }
+  .version { font-size: .85rem; color: var(--muted); font-variant-numeric: tabular-nums; }
+  .version a { color: var(--accent); }
+  a { color: var(--accent); }
+  code, pre { font-family: ui-monospace, SFMono-Regular, "Cascadia Code", Consolas, monospace; }
+  code { background: var(--code-bg); padding: .1em .35em; border-radius: 4px; font-size: .9em; }
+  pre {
+    background: var(--code-bg); border: 1px solid var(--line); border-radius: 8px;
+    padding: .9rem 1rem; overflow-x: auto; font-size: .82rem; line-height: 1.5; margin: 0;
+  }
+  pre code { background: none; padding: 0; font-size: inherit; }
+  .block { margin: 0 0 1rem; }
+  .block-head {
+    display: flex; align-items: center; justify-content: space-between;
+    gap: 1rem; margin-bottom: .4rem;
+  }
+  .block-head h3 { font-size: .95rem; margin: 0; font-weight: 600; }
+  .btn {
+    font: inherit; font-size: .82rem; padding: .3rem .7rem; cursor: pointer;
+    background: var(--card); color: var(--fg); border: 1px solid var(--line);
+    border-radius: 6px; white-space: nowrap;
+  }
+  .btn:hover { border-color: var(--accent); color: var(--accent); }
+  .btn.primary { background: var(--accent); color: var(--bg); border-color: var(--accent); }
+  .btn.primary:hover { opacity: .9; color: var(--bg); }
+  .actions { display: flex; flex-wrap: wrap; gap: .6rem; margin: 1rem 0 0; }
+  table { border-collapse: collapse; width: 100%; font-size: .9rem; }
+  th, td { text-align: left; padding: .5rem .6rem; border-bottom: 1px solid var(--line); }
+  th { font-weight: 600; color: var(--muted); font-size: .8rem; text-transform: uppercase; letter-spacing: .04em; }
+  td code { font-size: .82em; }
+  .warn {
+    background: var(--warn-bg); border: 1px solid var(--warn-line);
+    border-radius: 8px; padding: .9rem 1rem; margin: 1.25rem 0; font-size: .92rem;
+  }
+  .warn strong { color: var(--accent); }
+  footer { margin-top: 3.5rem; padding-top: 1.25rem; border-top: 1px solid var(--line); font-size: .85rem; color: var(--muted); }
+  .muted { color: var(--muted); font-size: .9rem; }
+</style>
+</head>
+<body>
+<main>
+  <h1>directa-mcp</h1>
+  <p class="lede">Directa SIM's Darwin API (dAPI) as MCP tools — positions, balance, orders, candles and ticks.</p>
+  <p class="version">Latest release <a id="rel-link" href="https://github.com/simoneb/directa-mcp/releases"><span id="tag">…</span></a> · <span id="rel-date"></span></p>
+
+  <p>Darwin listens on <code>127.0.0.1</code> only while it is running and logged in, so this is a <strong>local</strong> server: your client starts it on the same machine, and nothing is sent to Directa over the internet. There are no API keys — the authentication is Darwin being logged in.</p>
+
+  <p class="muted">You need Darwin (with API access enabled under <em>Sviluppatori&nbsp;&gt;&nbsp;Dev kit</em>) and <a href="https://docs.astral.sh/uv/">uv</a>. Candles and ticks additionally need Directa's real-time data entitlement.</p>
+
+  <h2>Install</h2>
+
+  <div class="actions">
+    <a class="btn primary" id="mcpb" href="https://github.com/simoneb/directa-mcp/releases/latest">Claude Desktop — download extension</a>
+    <a class="btn" id="vscode" href="#">Install in VS Code</a>
+  </div>
+  <p class="muted" style="margin-top:.6rem">The Claude Desktop extension installs by double-clicking the downloaded file, and puts both switches below in its settings panel.</p>
+
+  <h2>Or configure it by hand</h2>
+
+  <div class="block">
+    <div class="block-head">
+      <h3>Claude Desktop · Cursor · Windsurf · Gemini CLI</h3>
+      <button class="btn" data-copy="json">Copy</button>
+    </div>
+    <pre><code id="json">…</code></pre>
+  </div>
+
+  <div class="block">
+    <div class="block-head">
+      <h3>Codex CLI — <code>~/.codex/config.toml</code></h3>
+      <button class="btn" data-copy="toml">Copy</button>
+    </div>
+    <pre><code id="toml">…</code></pre>
+  </div>
+
+  <div class="block">
+    <div class="block-head">
+      <h3>Command line</h3>
+      <button class="btn" data-copy="cli">Copy</button>
+    </div>
+    <pre><code id="cli">…</code></pre>
+  </div>
+
+  <table>
+    <thead><tr><th>Client</th><th>Where the JSON goes</th></tr></thead>
+    <tbody>
+      <tr><td>Claude Desktop</td><td><code>%APPDATA%\Claude\claude_desktop_config.json</code>, or <code>~/Library/Application&nbsp;Support/Claude/</code></td></tr>
+      <tr><td>Cursor</td><td><code>~/.cursor/mcp.json</code></td></tr>
+      <tr><td>Windsurf</td><td><code>~/.codeium/windsurf/mcp_config.json</code></td></tr>
+      <tr><td>Gemini CLI</td><td><code>~/.gemini/settings.json</code></td></tr>
+      <tr><td>VS Code</td><td><code>.vscode/mcp.json</code> — keyed under <code>servers</code>, with <code>"type": "stdio"</code></td></tr>
+    </tbody>
+  </table>
+
+  <p class="muted">ChatGPT on the web and desktop accepts only remote HTTP servers, so it cannot run this one; Codex CLI is the way in there.</p>
+
+  <div class="warn">
+    <p style="margin:0"><strong>Orders are off until you turn them on.</strong> While <code>DIRECTA_ENABLE_ORDERS</code> is false, the tools that place, modify or cancel orders send nothing at all to Darwin. There is no simulated mode — the dAPI has no command that accepts an order without sending it to market, so with the flag on, orders are real, with real money.</p>
+  </div>
+
+  <h2>What it exposes</h2>
+  <table>
+    <tbody>
+      <tr><td><code>check_connection</code>, <code>get_darwin_status</code></td><td>Whether Darwin is up, and whether the datafeed is enabled</td></tr>
+      <tr><td><code>get_positions</code>, <code>get_position</code>, <code>get_portfolio_overview</code></td><td>Positions, with derived prices and a reconciliation check against Darwin's own figures</td></tr>
+      <tr><td><code>get_account_balance</code>, <code>get_availability</code></td><td>Liquidity, open P&amp;L, equity, buying power</td></tr>
+      <tr><td><code>get_orders</code>, <code>preview_limit_order</code></td><td>The day's orders; what an order would cost without placing it</td></tr>
+      <tr><td><code>place_limit_order</code>, <code>modify_order</code>, <code>cancel_order</code>, <code>cancel_all_orders</code></td><td>Real orders — gated</td></tr>
+      <tr><td><code>get_daily_candles</code>, <code>get_intraday_candles</code>, <code>get_candle_data_range</code>, <code>get_tick_data</code></td><td>OHLC candles and ticks — need the datafeed entitlement</td></tr>
+      <tr><td><code>start_darwin</code></td><td>Launches dGO so you can log in; the OTP stays yours</td></tr>
+    </tbody>
+  </table>
+  <p class="muted">Every tool carries the protocol's annotations, so a client can group them by permission and ask for approval only where it matters.</p>
+
+  <footer>
+    <a href="https://github.com/simoneb/directa-mcp">Source</a> ·
+    <a href="https://github.com/simoneb/directa-mcp/blob/master/docs/PROTOCOL.md">Protocol notes</a> ·
+    MIT licence. Not affiliated with Directa SIM.
+  </footer>
+</main>
+
+<script>
+const REPO = "simoneb/directa-mcp";
+const FALLBACK = "v0.3.2";
+
+const tarball = tag => `https://github.com/${REPO}/archive/refs/tags/${tag}.tar.gz`;
+
+function render(tag, published, mcpbUrl) {
+  const from = tarball(tag);
+  document.getElementById("tag").textContent = tag;
+  document.getElementById("rel-link").href = `https://github.com/${REPO}/releases/tag/${tag}`;
+  if (published) {
+    document.getElementById("rel-date").textContent =
+      new Date(published).toLocaleDateString(undefined, { year: "numeric", month: "long", day: "numeric" });
+  }
+  if (mcpbUrl) document.getElementById("mcpb").href = mcpbUrl;
+
+  document.getElementById("json").textContent = JSON.stringify({
+    mcpServers: {
+      directa: {
+        command: "uvx",
+        args: ["--from", from, "directa-mcp"],
+        env: { DIRECTA_ENABLE_ORDERS: "false" }
+      }
+    }
+  }, null, 2);
+
+  document.getElementById("toml").textContent =
+    `[mcp_servers.directa]\ncommand = "uvx"\nargs = ["--from", "${from}", "directa-mcp"]\n\n` +
+    `[mcp_servers.directa.env]\nDIRECTA_ENABLE_ORDERS = "false"`;
+
+  document.getElementById("cli").textContent =
+    `# Claude Code\nclaude mcp add directa --scope user -- uvx --from "${from}" directa-mcp\n\n` +
+    `# Codex CLI\ncodex mcp add directa -- uvx --from "${from}" directa-mcp`;
+
+  const vscode = { type: "stdio", command: "uvx", args: ["--from", from, "directa-mcp"],
+                   env: { DIRECTA_ENABLE_ORDERS: "false" } };
+  document.getElementById("vscode").href =
+    "https://vscode.dev/redirect/mcp/install?name=directa&config=" + encodeURIComponent(JSON.stringify(vscode));
+}
+
+// The page carries no version of its own: the tag comes from whatever the latest
+// release is, so a new release updates these snippets with nothing to edit here.
+fetch(`https://api.github.com/repos/${REPO}/releases/latest`)
+  .then(r => r.ok ? r.json() : Promise.reject(r.status))
+  .then(r => {
+    const asset = (r.assets || []).find(a => a.name.endsWith(".mcpb"));
+    render(r.tag_name, r.published_at, asset && asset.browser_download_url);
+  })
+  .catch(() => render(FALLBACK, null, null));
+
+document.querySelectorAll("[data-copy]").forEach(btn => {
+  btn.addEventListener("click", async () => {
+    await navigator.clipboard.writeText(document.getElementById(btn.dataset.copy).textContent);
+    const was = btn.textContent;
+    btn.textContent = "Copied";
+    setTimeout(() => { btn.textContent = was; }, 1200);
+  });
+});
+</script>
+</body>
+</html>

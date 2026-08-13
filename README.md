@@ -2,6 +2,8 @@
 
 MCP server exposing Directa SIM's Darwin API (dAPI) to any MCP client — positions, balance, orders, historical data.
 
+**[simoneb.github.io/directa-mcp](https://simoneb.github.io/directa-mcp/)** carries the config for the current release, ready to copy, and a one-click extension for Claude Desktop.
+
 Darwin listens on `127.0.0.1` only while it is running and logged in, so this is a **local** stdio server: your client starts it on the same machine. Hosts that only accept remote HTTP servers cannot run it (ChatGPT web and desktop among them; use Codex CLI there). There are no API keys — the authentication is Darwin being logged in.
 
 ## Prerequisites
