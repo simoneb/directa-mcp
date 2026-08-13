@@ -2,7 +2,7 @@
   "manifest_version": "0.4",
   "name": "directa-mcp",
   "display_name": "Directa (Darwin dAPI)",
-  "version": "0.3.2",
+  "version": "0.4.0",
   "description": "Positions, balance, orders and historical data from Directa SIM's Darwin platform.",
   "long_description": "Exposes Directa SIM's Darwin API (dAPI) as MCP tools: positions with derived prices and a reconciliation check, account balance and buying power, the day's orders, and OHLC candles and ticks. Darwin must be running and logged in on this machine — the extension talks to its local sockets, never to Directa over the internet. Order tools stay inert unless you enable them below.",
   "author": {
