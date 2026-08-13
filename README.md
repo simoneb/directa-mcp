@@ -1,49 +1,31 @@
 # directa-mcp
 
-Server MCP che espone la Darwin API (dAPI) di Directa SIM come tool per Claude — posizioni, saldo, ordini, dati storici.
+MCP server exposing Directa SIM's Darwin API (dAPI) to Claude — positions, balance, orders, historical data.
 
-## Come funziona
+## Local, not cloud
 
-L'API di Directa **non è cloud**: Darwin apre dei socket TCP in ascolto su `127.0.0.1` (trading sulla 10002, dati storici sulla 10003) solo mentre l'app è avviata e loggata. Di conseguenza questo è un server MCP **locale** (stdio), lanciato da Claude Desktop o Claude Code sulla stessa macchina dove gira Darwin — non un connector remoto da aggiungere in claude.ai/settings come quello di Interactive Brokers.
+Darwin opens TCP sockets on `127.0.0.1` (10002 trading, 10003 historical) only while the app is running and logged in. So this is a **local** stdio server, launched by Claude Desktop or Claude Code on the same machine as Darwin — not a remote connector.
 
-Il protocollo dAPI è testuale a righe e il client è implementato qui, in [`src/directa_mcp/dapi.py`](src/directa_mcp/dapi.py), senza dipendenze esterne oltre a `mcp` e `python-dotenv`. Il progetto era partito appoggiandosi alla libreria community [`directa-api-python`](https://github.com/NiccoloSalvini/directa-api-python), rimossa dopo i test contro Darwin reale — vedi [Perché un client interno](#perché-un-client-interno).
+There are no API keys to configure: the authentication is Darwin being logged in on your machine.
 
-Ogni comando e formato di risposta usato dal client è documentato in [`docs/PROTOCOL.md`](docs/PROTOCOL.md) con le trascrizioni raw da cui è stato ricavato.
+## Prerequisites
 
-## Prerequisiti
+1. An active Directa account.
+2. Darwin installed (needs a Java JRE/JDK) and logged in.
+3. API access enabled: sign the disclaimer in the reserved area on directatrading.com, then check **Sviluppatori > Dev kit** in Darwin.
+4. Historical tools (candles, ticks) additionally need the real-time quote entitlement. Without it every historical command answers `1032 — datafeed non abilitato`; `get_darwin_status` reports this up front as `datafeed_enabled`.
 
-1. Conto Directa attivo.
-2. Darwin installato (richiede Java JRE/JDK) e avviato, loggato con l'account.
-3. Accesso API abilitato: firma il disclaimer nell'area riservata su directatrading.com, poi in Darwin vai su **Sviluppatori > Dev kit** per verificare che i socket siano attivi.
-4. Per i dati storici (candele, tick) serve **anche** l'abilitazione alle quotazioni real-time sul conto. Senza, ogni comando storico risponde `1032 — datafeed non abilitato`; lo vedi in anticipo dal campo `datafeed_enabled` di `get_darwin_status`.
+## Install
 
-## Setup
+`uvx` fetches the package, provisions a suitable Python and runs it in an isolated environment — only [uv](https://docs.astral.sh/uv/) is needed, no clone and no virtualenv. Pick a tag from the [releases](https://github.com/simoneb/directa-mcp/releases), ideally the latest, and substitute it for `<TAG>` below.
 
-```powershell
-cd D:\dev\trading\directa-mcp
-uv venv
-uv pip install -e ".[dev]"
-copy .env.example .env
-pytest
-```
-
-(o con `pip`: `python -m venv .venv`, poi `.venv\Scripts\pip install -e ".[dev]"`)
-
-I test girano contro un finto Darwin su socket ([`tests/fake_darwin.py`](tests/fake_darwin.py)) e non richiedono la piattaforma avviata.
-
-## Come si usa
-
-### 1. Registra il server
-
-Non serve clonare il repository né gestire un virtualenv: `uvx` scarica il pacchetto, si procura un Python adeguato e lancia l'entry point in un ambiente isolato. Serve solo [uv](https://docs.astral.sh/uv/) installato.
-
-**Claude Code**, disponibile da qualsiasi directory:
+**Claude Code:**
 
 ```powershell
-claude mcp add directa --scope user -- uvx --from "git+https://github.com/simoneb/directa-mcp@v0.1.0" directa-mcp
+claude mcp add directa --scope user -- uvx --from "https://github.com/simoneb/directa-mcp/archive/refs/tags/<TAG>.tar.gz" directa-mcp
 ```
 
-**Claude Desktop** — aggiungi a `%APPDATA%\Claude\claude_desktop_config.json` e riavvia l'app:
+**Claude Desktop** — add to `%APPDATA%\Claude\claude_desktop_config.json` and restart the app:
 
 ```json
 {
@@ -52,7 +34,7 @@ claude mcp add directa --scope user -- uvx --from "git+https://github.com/simone
       "command": "uvx",
       "args": [
         "--from",
-        "git+https://github.com/simoneb/directa-mcp@v0.1.0",
+        "https://github.com/simoneb/directa-mcp/archive/refs/tags/<TAG>.tar.gz",
         "directa-mcp"
       ],
       "env": {
@@ -63,154 +45,103 @@ claude mcp add directa --scope user -- uvx --from "git+https://github.com/simone
 }
 ```
 
-Il riferimento `@v0.1.0` è un tag, non un branch: pinna una versione precisa. Senza, ogni avvio prenderebbe l'ultimo commit di `master`, che su uno strumento che parla col tuo conto non è desiderabile. Per aggiornare, cambia il tag.
+Pin a tag rather than a branch: without one every start would pull the tip of `master`, which is not what you want from a tool that talks to your account. To upgrade, change the tag.
 
-**Finché il repository è privato** questo funziona solo su una macchina il cui `git` è già autenticato verso GitHub — per esempio via Git Credential Manager, o dopo `gh auth setup-git`. Verificato: `uvx` delega a `git`, che usa il credential helper, quindi non serve nessun token nel file di configurazione. Su una macchina non autenticata la risoluzione fallisce con un errore di accesso al repository.
+Prefer the archive URL over `git+https://…`. The git form makes `uvx` shell out to `git`, and Claude Desktop starts MCP servers with no `PATHEXT` in the environment — so the executable lookup fails with `Git executable not found` even where git is installed and on `PATH`.
 
-**Se preferisci lavorare dai sorgenti** (per sviluppare il server, non per usarlo) la strada resta quella del [Setup](#setup), e la registrazione punta al Python del venv con percorso assoluto — Claude Desktop avvia il processo con un ambiente proprio, senza il venv attivo:
+**Working from source** (to develop the server, not to use it):
 
 ```powershell
-claude mcp add directa-dev --scope user -- D:\dev\trading\directa-mcp\.venv\Scripts\python.exe -m directa_mcp.server
+uv venv
+uv pip install -e ".[dev]"
+pytest
 ```
 
-### 2. Avvia Darwin
+Tests run against a fake Darwin over sockets, so the platform need not be running. Then register the venv's Python by absolute path — Claude starts the process with its own environment, without the venv active:
 
-Il server parla con Darwin, non con Directa. Se Darwin è chiuso o disconnesso ogni tool fallisce, e `check_connection` te lo dice in chiaro. Non serve nessuna chiave API né credenziale nella configurazione: l'autenticazione è il fatto che Darwin è loggato sulla tua macchina.
-
-Puoi anche farlo partire da qui, con `start_darwin` — vedi [Avvio di Darwin](#avvio-di-darwin-start_darwin).
-
-### 3. Chiedi in italiano
-
-Non c'è niente da imparare a memoria — i tool si descrivono da soli e Claude sceglie quale usare. Cose che funzionano oggi:
-
-- *"Come sta andando il portafoglio?"* → `get_portfolio_overview`: ogni posizione con prezzo corrente, valore, P&L, e i totali
-- *"Quanto ho investito in obbligazioni rispetto agli ETF?"*
-- *"Quali sono le mie posizioni in perdita?"*
-- *"Ho ordini aperti?"* → `get_orders` con `pending_only`
-- *"Quanto posso investire?"* → `get_availability`
-- *"Com'è andato l'ordine su M.100001?"*
-- *"Darwin è connesso?"* → `check_connection`
-- *"Avvia Darwin"* → `start_darwin`, se l'hai abilitato
-
-Cose che **non** funzionano, e perché:
-
-- *"Qual è il prezzo di ENI adesso?"* — niente quotazioni: il datafeed real-time non è abilitato sul conto. I prezzi delle **tue** posizioni sì, quelli si ricavano dal portafoglio.
-- *"Fammi un grafico dell'ultimo mese"* — candele e tick richiedono la stessa abilitazione.
-- *"Compra 100 ENI"* — bloccato, salvo che tu abbia armato il server: vedi sotto.
-
-### Una nota sull'affidabilità dei numeri
-
-Darwin non espone un prezzo corrente su questa porta. `get_portfolio_overview` lo ricava dal prezzo medio e dal gain teorico, gestisce la convenzione percentuale delle obbligazioni, e poi **verifica i propri conti** contro le cifre di Darwin. Se la verifica non torna, il campo `reconciliation.reconciled` è `false` e Claude te lo deve dire invece di presentare i totali come fatti. Sul conto testato il residuo è 0,00 €.
-
-Non chiedere a Claude di calcolarsi i valori da `get_positions`: `quantità × prezzo` su un'obbligazione sbaglia di 100 volte.
-
-## Cosa è verificato e cosa no
-
-Testato contro **Darwin 2.5.1** su un conto reale (`PROD`), il 2026-08-12:
-
-- ✅ `check_connection`, `get_darwin_status`
-- ✅ `get_account_balance`, `get_availability`
-- ✅ `get_positions` (15 posizioni, lista completa), `get_position`
-- ✅ `get_portfolio_overview`, con riconciliazione a **0,00 €** di residuo contro le cifre di Darwin su 15 posizioni
-- ✅ `get_orders`, incluso `pending_only`
-- ✅ Il gate sugli ordini: con `DIRECTA_ENABLE_ORDERS` non impostato i tool di trading non inviano nulla
-- ✅ `start_darwin`: ciclo completo verificato. dGO lanciato, autologin passato, pagina OTP, e dopo il codice Darwin è partito da solo via AutoSelezione — porte 10002 e 10003 aperte, `CONN_OK`, posizioni lette. Verificato anche che `dGO.exe` esce subito lasciando vivo il suo `java.exe`, che sopravvive alla morte del processo che l'ha lanciato, e che una seconda chiamata a Darwin già avviato risponde `launched: false` senza aprire nulla. Rami che non lanciano (gate chiuso, login in corso, dGO inesistente) coperti dai test.
-- ✅ Il rilevamento dei processi: con Darwin avviato restituisce esattamente i due `java.exe` del runtime dGO riportati da `Win32_Process`, e forzando le porte a "chiuse" `start_darwin` rifiuta di aprire un secondo dGO.
-- ℹ️ Osservato durante quella verifica: **le porte si aprono qualche secondo prima del collegamento**. Nella finestra intermedia `get_darwin_status` risponde `CONN_UNAVAILABLE` pur con le porte raggiungibili; poco dopo `CONN_OK`. Non è un guasto, è l'avvio in corso.
-- ⚠️ Tool storici (`get_daily_candles`, `get_intraday_candles`, `get_candle_data_range`, `get_tick_data`): raggiungono Darwin e restituiscono correttamente l'errore, ma **non è stato possibile vedere dati reali** perché il conto di test non ha le quotazioni abilitate (`1032`). Il formato delle righe `CANDLE;`/`TBT;` viene dalla documentazione ed è da confermare.
-- ✅ `preview_limit_order`: restituisce la dichiarazione pre-trade di Darwin — commissione, importo, nome dello strumento, conflitto d'interesse — e **non piazza nulla** (`on_market: false`, portafoglio e liquidità invariati).
-- ✅ `place_limit_order`: ciclo completo verificato con un ordine reale. `ACQAZ` → `TRADCONFIRM 3003` → `CONFORD` → `TRADOK 3000`, ordine a mercato con stato `2000`, confermato rileggendo da Darwin.
-- ✅ `modify_order`: verificato. `MODORD` → `TRADOK 3002`, senza conferma. Darwin fa cancel-and-replace riusando lo stesso ID.
-- ✅ `cancel_order`: verificato. `REVORD` → `TRADOK 3002`, ordine a `2004 Revocato` e `quantity_trading` tornato a zero.
-- ❌ `cancel_all_orders`: **non verificato, deliberatamente**. È l''unica operazione che può toccare ordini non creati da noi: se il filtro per simbolo non funzionasse revocherebbe altro. Non è stata provata con ordini reali di terzi sul conto.
-
-## Perché un client interno
-
-Testando il server contro Darwin reale, la libreria community si è rivelata inservibile sul percorso di lettura, con tre problemi:
-
-1. `get_portfolio()` invia `GETPORTFOLIO` e `get_account_info()` invia `GETACCTINFO`. Darwin rifiuta entrambi con `ERR 1004`: i comandi giusti sono `INFOSTOCKS` e `INFOACCOUNT`. Curiosamente i parser della libreria sono già scritti per quei due comandi — è solo l'invio che è sbagliato.
-2. Per le risposte multi-riga, `send_command` restituisce **solo la prima riga** che corrisponde al prefisso atteso. Osservato dal vivo: `ORDERLIST` restituisce 4 ordini sul socket, `get_orders()` ne restituiva 1. Con il comando portafoglio corretto avrebbe perso 14 posizioni su 15 — perdita di dati silenziosa, senza errore.
-3. La lettura non isola la risposta dal traffico non richiesto. Darwin pusha l'intero portafoglio e la lista ordini a ogni connessione, e poi aggiornamenti spontanei: senza filtro, prima o poi si legge la posta di qualcun altro.
-
-Il client interno risolve questi punti alla radice: comandi verificati uno per uno, framing **deterministico** via `FLOWPOINT TRUE` (che fa avvolgere le liste in marker `BEGIN`/`END`, quindi si legge fino al terminatore invece di aspettare che il socket taccia), e risposte selezionate per prefisso con tutto il resto instradato in `unsolicited`. Se Darwin rifiuta `FLOWPOINT`, il client si rifiuta di partire anziché tirare a indovinare dove finisce un portafoglio.
-
-Gli stessi fix sono stati proposti upstream alla libreria — vedi [`docs/UPSTREAM.md`](docs/UPSTREAM.md).
-
-## Sicurezza — il gate sugli ordini
-
-I tool che immettono, modificano o cancellano ordini funzionano **solo** se il server è avviato con `DIRECTA_ENABLE_ORDERS=true`. Altrimenti non inviano nulla a Darwin e restituiscono `success: false` con `blocked: true`.
-
-**Non esiste una modalità simulata**, e non è una scelta di questo progetto: la dAPI non ha alcun comando che accetti un ordine senza mandarlo a mercato, e la documentazione Directa è esplicita — *"Directa non fornisce alcun conto prova per sviluppare applicazioni esterne"*. La demo 15 giorni a 100.000 € virtuali riguarda le piattaforme, non lo sviluppo su API. Quindi qualunque libreria che offra una "simulation mode" per questa API sta inventando le risposte lato client: è esattamente ciò che faceva la versione precedente di questo server, restituendo per un ordine mai partito un ack plausibile e indistinguibile da uno vero.
-
-Di conseguenza il flag non è un selettore di modalità ma una **sicura**. Vale per tre motivi:
-
-1. Il server è pilotato da un modello. Senza il flag, un'istruzione fraintesa non può raggiungere Darwin.
-2. Vive nella configurazione del processo MCP, quindi il modello non può accenderlo: solo tu, modificando la config e riavviando.
-3. Puoi registrare il server per le domande sul portafoglio lasciando inerte tutta la superficie di trading.
-
-Si chiamava `DIRECTA_LIVE_TRADING`, nome che implicava l'esistenza di un trading non-live. Rinominato per dire cosa fa davvero.
-
-Con il flag a `true` gli ordini sono reali, con soldi reali, e sono la parte non verificata di questo server.
-
-## Avvio di Darwin (`start_darwin`)
-
-Con `DIRECTA_AUTOSTART=true` il server espone `start_darwin`, che lancia **dGO**. Non lancia Darwin direttamente, perché Darwin non ha un eseguibile installato: è un jar che dGO scarica in `~/.directa/tmp/darwin.jar` e avvia così
-
-```
-java -cp darwin.jar;... directa.ui.Darwin www1.directatrading.com <TOKEN> -distro=E ...
+```powershell
+claude mcp add directa-dev --scope user -- <repo>\.venv\Scripts\python.exe -m directa_mcp.server
 ```
 
-dove `<TOKEN>` è un ticket di sessione emesso al login e **diverso a ogni avvio** (verificabile nei log del launcher, `~/.directa/log/LauncherHTML-dGO.*`). Quel comando non è quindi ripetibile, e l'unico punto d'ingresso praticabile resta dGO.
+## Usage
 
-Perché arrivi fino a Darwin invece di fermarsi sulla griglia delle tile, in **dGO > Preferenze > AutoSelezione** va scelto "Darwin 2" e spuntata la casella. È l'impostazione `preferredAction` di dGO, che il server **non scrive**: qui non si tocca nessun file, nessuna chiave di registro, nessun processo che non sia stato avviato da noi.
+The tools describe themselves, so ask in plain language: how the portfolio is doing, which positions are down, whether there are open orders, how much is available to invest, whether Darwin is connected.
 
-**Resta comunque un umano nel percorso**: Darwin chiede l'OTP. Perciò il tool non aspetta — ritorna appena dGO è partito, e sei tu a completare il login. Da lì `check_connection` riporta uno dei tre stati:
+Current prices for arbitrary symbols, and charts, do not work without the datafeed entitlement. Prices for **your** positions do — those are derived from the portfolio.
 
-| `darwin.state` | Significato |
+Don't ask Claude to compute values from `get_positions`: `quantity × price` is wrong by 100× on bonds. `get_portfolio_overview` handles the convention and reconciles its own arithmetic against Darwin's figures; when `reconciliation.reconciled` is false the totals are not to be presented as fact.
+
+## The order gate
+
+Tools that place, modify or cancel orders work **only** when the server runs with `DIRECTA_ENABLE_ORDERS=true`. Otherwise they send nothing at all to Darwin and return `success: false` with `blocked: true`.
+
+**There is no simulated mode**, and that is not this project's choice: the dAPI has no command that accepts an order without sending it to market, and Directa states plainly that it provides no test account for developing external applications. So any library offering a "simulation mode" for this API is inventing the responses client-side — which is exactly what the previous version of this server did, returning a plausible acknowledgement for an order that never left.
+
+The flag is therefore a safety catch, not a mode selector. It lives in the MCP process configuration, so the model cannot turn it on — only you can, by editing the config and restarting. Which also means you can register the server for portfolio questions and leave the whole trading surface inert.
+
+With the flag on, orders are real, with real money.
+
+`cancel_all_orders` is deliberately unverified: it is the one operation that can touch orders this server did not create, so a broken symbol filter would revoke something else.
+
+## Starting Darwin
+
+With `DIRECTA_AUTOSTART=true` the server exposes `start_darwin`, which launches **dGO**, Directa's launcher. It cannot launch Darwin directly: Darwin has no installed executable, only a jar that dGO downloads and starts with a session token reissued at every login, so that command line is not repeatable.
+
+For it to reach Darwin instead of stopping at dGO's tile grid, set **AutoSelezione** to "Darwin 2" in dGO's Preferenze. The server does not write that setting, or anything else on the machine — no files, no registry keys, no process it did not start itself.
+
+**A human stays in the path**: Darwin asks for an OTP. So the tool does not wait — it returns as soon as dGO is up, and you complete the login. From there `check_connection` reports one of three states:
+
+| `darwin.state` | meaning |
 |---|---|
-| `running` | Le porte rispondono, non c'è niente da avviare |
-| `starting` | Porte chiuse, ma o dGO è stato lanciato da qui negli ultimi 5 minuti, o c'è software Directa in esecuzione — tipicamente si attende l'OTP |
-| `stopped` | Nessuna porta, e nessun processo Directa sulla macchina |
+| `running` | the ports answer, nothing to start |
+| `stopped` | no ports, and no Directa process on the machine |
+| `starting` | ports closed, but either dGO was launched from here recently or Directa software is running — typically waiting on the OTP |
 
-`start_darwin` lancia **solo** in stato `stopped`. Directa ammette una sessione per volta, e un dGO in più rischia di far cadere il login in corso.
+`start_darwin` launches **only** in `stopped`. Directa allows one session at a time, and a second dGO risks dropping the login in progress. It never closes Darwin, and there is no `stop_darwin`: shutting down a platform that may have working orders on the book is not a decision to automate.
 
-Il secondo segnale dello stato `starting` è una scansione dei processi che girano dalla directory di installazione di dGO (`CreateToolhelp32Snapshot` + `QueryFullProcessImageNameW` via `ctypes`, senza dipendenze né comandi esterni). Il match è sulla **directory**, non sul nome: `dGO.exe` esce pochi secondi dopo l'avvio lasciando in piedi il `java.exe` del runtime che si porta dietro, ed è quello a restare. Lo stesso runtime esegue poi Darwin, quindi un riscontro significa "c'è roba di Directa in esecuzione" più che "c'è il launcher" — distinzione che non serve, perché il caso in cui Darwin è davvero su lo risolvono le porte prima di arrivare qui. Se la scansione non può funzionare (dGO non installato, handle non apribile, processo che sparisce a metà) risponde "niente trovato": una diagnostica non deve essere ciò che rompe la diagnosi.
+The flag is separate from `DIRECTA_ENABLE_ORDERS` on purpose — starting the platform and being allowed to send it orders are two distinct consents.
 
-Un limite resta, ed è strutturale: con l'OTP obbligatorio questo server **non è automatizzabile senza presidio** (cron, agenti schedulati). Qualcuno deve digitare il codice.
+Note that the ports open a few seconds before the connection is established: in that window `get_darwin_status` answers `CONN_UNAVAILABLE` with the ports already reachable. That is startup in progress, not a fault.
 
-`start_darwin` non chiude mai Darwin, e non esiste uno `stop_darwin`. Chiudere una piattaforma che può avere ordini di lavoro sul book non è una decisione da automatizzare.
+Because the OTP is mandatory, this server **cannot be automated unattended** — cron jobs, scheduled agents. Someone has to type the code.
 
-Il flag è separato da `DIRECTA_ENABLE_ORDERS` di proposito: avviare la piattaforma e poterle mandare ordini sono due consensi distinti.
+## Tools
 
-## Tool esposti
-
-| Tool | Descrizione | Stato |
+| Tool | Description | Status |
 |---|---|---|
-| `check_connection` | Raggiungibilità TCP delle porte Darwin, più lo stato `running`/`starting`/`stopped` (diagnostica, non richiede login) | ✅ |
-| `start_darwin` | Lancia dGO perché tu possa avviare Darwin; non attende, l'OTP resta tuo. Serve `DIRECTA_AUTOSTART=true` | ✅ |
-| `get_darwin_status` | Stato connessione, release, e se il datafeed è abilitato | ✅ |
-| `get_account_balance` | Liquidità, P&L aperto, equity (`INFOACCOUNT`) | ✅ |
-| `get_availability` | Potere d'acquisto, con e senza margine (`INFOAVAILABILITY`) | ✅ |
-| `get_positions` | Tutte le posizioni aperte, come le riporta Darwin | ✅ |
-| `get_portfolio_overview` | Posizioni con prezzo e valore ricavati, totali e P&L, con verifica di riconciliazione | ✅ |
-| `get_position` | Una singola posizione per simbolo | ✅ |
-| `get_orders` | Ordini della giornata con stato decodificato; `pending_only` per i soli attivi | ✅ |
-| `preview_limit_order` | Cosa costerebbe un ordine, **senza piazzarlo**: commissioni, importo, strumento | ✅ |
-| `place_limit_order` | Ordine limite buy/sell, con conferma nella stessa connessione | ⚠️ parziale |
-| `modify_order` | Modifica prezzo di un ordine aperto | ❌ non verificato |
-| `cancel_order` | Cancella un ordine per ID | ❌ non verificato |
-| `cancel_all_orders` | Cancella tutti gli ordini su un simbolo | ❌ non verificato |
-| `get_daily_candles` | Candele giornaliere OHLC | ⚠️ serve datafeed |
-| `get_intraday_candles` | Candele intraday con periodo configurabile | ⚠️ serve datafeed |
-| `get_candle_data_range` | Candele su un range di date esplicito | ⚠️ serve datafeed |
-| `get_tick_data` | Dati tick-by-tick | ⚠️ serve datafeed |
+| `check_connection` | TCP reachability of the Darwin ports, plus `running`/`starting`/`stopped` (needs no login) | ✅ |
+| `start_darwin` | Launches dGO so you can start Darwin; does not wait, the OTP stays yours. Needs `DIRECTA_AUTOSTART=true` | ✅ |
+| `get_darwin_status` | Connection state, release, whether the datafeed is enabled | ✅ |
+| `get_account_balance` | Liquidity, open P&L, equity (`INFOACCOUNT`) | ✅ |
+| `get_availability` | Buying power, with and without margin (`INFOAVAILABILITY`) | ✅ |
+| `get_positions` | Every open position, as Darwin reports it | ✅ |
+| `get_position` | A single position by symbol | ✅ |
+| `get_portfolio_overview` | Positions with derived price and value, totals and P&L, with a reconciliation check | ✅ |
+| `get_orders` | The day's orders with decoded state; `pending_only` for the live ones | ✅ |
+| `preview_limit_order` | What an order would cost — commission, amount, instrument — **without placing it** | ✅ |
+| `place_limit_order` | Buy/sell limit order, confirmed within the same connection | ✅ |
+| `modify_order` | Change the price of a working order | ✅ |
+| `cancel_order` | Cancel one order by id | ✅ |
+| `cancel_all_orders` | Cancel every order on a symbol | ❌ unverified by design |
+| `get_daily_candles` | Daily OHLC candles | ⚠️ needs datafeed |
+| `get_intraday_candles` | Intraday candles, configurable period | ⚠️ needs datafeed |
+| `get_candle_data_range` | Candles over an explicit date range | ⚠️ needs datafeed |
+| `get_tick_data` | Tick-by-tick data | ⚠️ needs datafeed |
 
-Tre formati di simbolo convivono: `ENI.MI` per i titoli di Borsa Italiana, ticker nudo per gli ETF (`VWCE`, `IWDA`), `M.<numero>` per le obbligazioni. Il modo affidabile per sapere quale usare è leggerlo da `get_positions`.
+Three symbol formats coexist: `ENI.MI` for Borsa Italiana stocks, bare tickers for ETFs (`VWCE`, `IWDA`), `M.<number>` for bonds. Read the format back from `get_positions` rather than guessing at it.
 
-## Due trappole nei dati, documentate
+Each tool carries the protocol's annotations — `readOnlyHint`, `destructiveHint`, `idempotentHint`, `openWorldHint` — so a client can sort them into permission groups instead of one undifferentiated list, and ask for approval only where it matters. The twelve reading tools are marked read-only; the six that put a command on the wire are not. `preview_limit_order` is the one worth knowing about: it places nothing, but it does send `ACQAZ`, so it is annotated as a write rather than flattered into the read-only group.
 
-**I nomi dei campi di `INFOACCOUNT` non descrivono il loro contenuto.** Misurato contro il portafoglio: `gain_euro` è il P&L aperto (coincide con la somma dei `theoretical_gain`), e `open_profit_loss` è il **costo di carico** del portafoglio, riconciliato al centesimo su 15 posizioni. Quindi `open_profit_loss` contiene un costo, non un profitto: leggerlo come guadagno lo sovrastima di quasi un ordine di grandezza. I nomi restano quelli di Directa invece di inventarne altri, e ogni risposta porta la riga `raw`.
+## Two data traps
 
-**Le obbligazioni sono quotate in percentuale del nominale.** In `STOCK;M.100001;10:00:00;20000;0;0;95.0;200` la quantità è 20.000 di nominale e il prezzo è il 95,00% di esso: la posizione vale **19.000 €**, non 1.900.000 €. `get_portfolio_overview` lo gestisce e verifica il risultato contro le cifre di Darwin; il calcolo ingenuo sbaglia di 100 volte.
+**`INFOACCOUNT` field names do not describe their contents.** Measured against the portfolio, `gain_euro` is the open P&L, while `open_profit_loss` is the portfolio's **carrying cost**, reconciled to the cent. Reading it as a gain overstates it by nearly an order of magnitude. The names stay Directa's rather than invented ones, and every response carries its `raw` line.
 
-Dettagli e trascrizioni in [`docs/PROTOCOL.md`](docs/PROTOCOL.md).
+**Bonds are quoted as a percentage of nominal.** In `STOCK;M.100001;10:00:00;20000;0;0;95.0;200` the quantity is 20,000 of nominal and the price is 95.00% of it: the position is worth **€19,000**, not €1,900,000. The naive calculation is wrong by 100×.
+
+## Implementation
+
+The dAPI is line-oriented text and the client lives in one file, [`src/directa_mcp/dapi.py`](src/directa_mcp/dapi.py), with no dependencies beyond `mcp` and `python-dotenv`. Every command and response format it uses is documented in [`docs/PROTOCOL.md`](docs/PROTOCOL.md), together with the raw transcripts it was derived from.
+
+Framing is deterministic via `FLOWPOINT TRUE`, which wraps lists in `BEGIN`/`END` markers, so a response is read up to its terminator instead of waiting for the socket to fall quiet; replies are selected by prefix and everything else is routed to `unsolicited`. If Darwin refuses `FLOWPOINT`, the client refuses to start rather than guess where a portfolio ends.
+
+The project began on the community library [`directa-api-python`](https://github.com/NiccoloSalvini/directa-api-python), dropped after testing against live Darwin — see [`docs/UPSTREAM.md`](docs/UPSTREAM.md) for the three defects and the fixes proposed upstream.

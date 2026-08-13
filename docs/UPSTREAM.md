@@ -1,36 +1,30 @@
-# Fix proposti a `directa-api-python`
+# Fixes proposed to `directa-api-python`
 
-Questo progetto era partito appoggiandosi a [`directa-api-python`](https://github.com/NiccoloSalvini/directa-api-python) (pacchetto `directa-api-wrapper`), la libreria community che mappa il protocollo dAPI in Python. I test contro Darwin reale hanno mostrato che il percorso di lettura della porta di trading non era utilizzabile, quindi il client è stato riscritto internamente ([`src/directa_mcp/dapi.py`](../src/directa_mcp/dapi.py)) e i fix sono stati proposti upstream.
+This project started on [`directa-api-python`](https://github.com/NiccoloSalvini/directa-api-python) (the `directa-api-wrapper` package), the community library mapping the dAPI to Python. Testing against live Darwin showed the read path on the trading port was unusable, so the client was rewritten in-house ([`src/directa_mcp/dapi.py`](../src/directa_mcp/dapi.py)) and the fixes were offered upstream.
 
-**PR: [NiccoloSalvini/directa-api-python#1](https://github.com/NiccoloSalvini/directa-api-python/pull/1)** — *Fix portfolio, account and order reads on the trading port*
+**PR: [NiccoloSalvini/directa-api-python#1](https://github.com/NiccoloSalvini/directa-api-python/pull/1)** — *Fix portfolio, account and order reads on the trading port*. Fork: [simoneb/directa-api-python](https://github.com/simoneb/directa-api-python), branch `fix/trading-port-reads`.
 
-Fork: [simoneb/directa-api-python](https://github.com/simoneb/directa-api-python), branch `fix/trading-port-reads`.
+## The three defects
 
-## I tre problemi
+1. **Commands Darwin rejects.** `get_portfolio()` sent `GETPORTFOLIO` and `get_account_info()` sent `GETACCTINFO`; Darwin answers `ERR;<command>;1004` to both. The correct commands are `INFOSTOCKS` and `INFOACCOUNT` — already named in the docstrings of the library's own parsers.
 
-1. **Comandi rifiutati da Darwin.** `get_portfolio()` inviava `GETPORTFOLIO` e `get_account_info()` inviava `GETACCTINFO`; Darwin risponde `ERR;<comando>;1004` a entrambi. I comandi corretti sono `INFOSTOCKS` e `INFOACCOUNT` — già nominati nei docstring dei parser della libreria stessa.
+2. **Multi-line responses truncated.** `TradingConnection.send_command` returned only the first line matching the expected prefix. Measured: `ORDERLIST` returns four orders on the socket and `get_orders()` returned one; a fifteen-position portfolio arrived as one. Silently, with no error or warning.
 
-2. **Troncamento delle risposte multi-riga.** `TradingConnection.send_command` restituiva solo la prima riga corrispondente al prefisso atteso. Misurato: `ORDERLIST` restituisce 4 ordini sul socket, `get_orders()` ne restituiva 1; un portafoglio da 15 posizioni arrivava come 1. Senza errore né warning.
+3. **No isolation from unsolicited traffic.** Darwin pushes the portfolio and order list on every connection, then spontaneous updates — all of it read as the reply to the command in flight.
 
-3. **Nessun isolamento dal traffico non richiesto.** Darwin pusha portafoglio e ordini a ogni connessione e poi aggiornamenti spontanei; venivano letti come risposta al comando in volo.
+The fix reads responses line by line with a persistent buffer, enables `FLOWPOINT` in `connect()` for `BEGIN`/`END` framing, returns every line of a list, exposes the initial push as `pushed_lines`, and no longer fails a command over a link notification (`ERR` codes 1024–1028). It adds twelve tests against a socket-level fake Darwin, runnable in CI without the platform.
 
-Il fix upstream legge la risposta riga per riga con buffer persistente, abilita `FLOWPOINT` in `connect()` per avere il framing `BEGIN`/`END`, restituisce tutte le righe di una lista, espone il push iniziale in `pushed_lines`, e non fa più fallire un comando per una notifica di link (codici `ERR` 1024-1028).
+## Why an in-house client regardless
 
-Include 12 test contro un finto Darwin su socket, eseguibili in CI senza la piattaforma.
+- The fixes sit on a `git+https` dependency not published to PyPI, so every user would depend on the merge and on a moving ref.
+- The dAPI is line-oriented text and the client fits in one file; the library added surface this server does not need (simulation mode with fabricated data, connection metrics, iterators).
+- The safety choices diverge: here the order gate is a flat refusal, whereas the library's `simulation_mode` answers with fabricated data — convenient when developing, risky for a tool driven by a model.
 
-## Perché comunque un client interno
+The fork's value is for anyone using the library directly.
 
-Anche a PR accettata, questo progetto resta sul client interno:
+## Still unverified upstream
 
-- I fix sono su una dipendenza `git+https` non pubblicata su PyPI, quindi ogni utente dipenderebbe dal merge e da un ref mobile.
-- Il protocollo dAPI è testuale a righe e il client sta in un file: la libreria aggiungeva superficie (simulation mode con dati finti, metriche di connessione, iteratori) di cui questo server non ha bisogno.
-- Le scelte di sicurezza divergono: qui il gate sugli ordini è un rifiuto netto, mentre la libreria in `simulation_mode` risponde con dati finti — comodo per lo sviluppo, rischioso per un tool esposto a un modello.
+Reported in the PR, unresolved:
 
-Il valore del fork è per chi usa la libreria direttamente.
-
-## Cosa resta da verificare upstream
-
-Segnalato nella PR, non risolto:
-
-- **Percorso ordini.** Non esercitato: l'unico conto disponibile è reale con posizioni e ordini vivi. Con il fix, le risposte `TRADOK`/`TRADERR`/`TRADCONFIRM` passano dal ramo "prefisso non noto" di `send_command`; va verificato che sia adeguato.
-- **Porta storica (10003).** Il suo `send_command` legge fino a `END CANDLES`/`END TBT` e non ha lo stesso difetto, ma non è stato possibile vedere dati reali: il conto di test non ha le quotazioni abilitate e ogni comando risponde `1032`.
+- **Order path.** Not exercised there: the only account available is real, with live positions and orders. With the fix, `TRADOK`/`TRADERR`/`TRADCONFIRM` fall through the "unknown prefix" branch of `send_command`; whether that is adequate needs checking.
+- **Historical port (10003).** Its `send_command` reads up to `END CANDLES`/`END TBT` and does not share the defect, but real data was never seen: the test account lacks the quote entitlement, so every command answers `1032`.
