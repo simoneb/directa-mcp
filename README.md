@@ -1,10 +1,12 @@
 # directa-mcp
 
-MCP server exposing Directa SIM's Darwin API (dAPI) to Claude — positions, balance, orders, historical data.
+MCP server exposing Directa SIM's Darwin API (dAPI) to any MCP client — positions, balance, orders, historical data.
 
 ## Local, not cloud
 
-Darwin opens TCP sockets on `127.0.0.1` (10002 trading, 10003 historical) only while the app is running and logged in. So this is a **local** stdio server, launched by Claude Desktop or Claude Code on the same machine as Darwin — not a remote connector.
+Darwin opens TCP sockets on `127.0.0.1` (10002 trading, 10003 historical) only while the app is running and logged in. So this is a **local** stdio server, launched by your client on the same machine as Darwin — not a remote connector.
+
+That rules out hosts which only accept remote servers over HTTP: ChatGPT on the web and desktop is one, so use Codex CLI on that side. Anything that can start a local process works.
 
 There are no API keys to configure: the authentication is Darwin being logged in on your machine.
 
@@ -17,15 +19,13 @@ There are no API keys to configure: the authentication is Darwin being logged in
 
 ## Install
 
-`uvx` fetches the package, provisions a suitable Python and runs it in an isolated environment — only [uv](https://docs.astral.sh/uv/) is needed, no clone and no virtualenv. Pick a tag from the [releases](https://github.com/simoneb/directa-mcp/releases), ideally the latest, and substitute it for `<TAG>` below.
+Every client is asking the same thing of you — the command that starts the server. `uvx` fetches the package, provisions a suitable Python and runs it in an isolated environment, so there is nothing to clone and no virtualenv to manage; only [uv](https://docs.astral.sh/uv/) is needed. Pick a tag from the [releases](https://github.com/simoneb/directa-mcp/releases), ideally the latest, and substitute it for `<TAG>` throughout.
 
-**Claude Code:**
-
-```powershell
-claude mcp add directa --scope user -- uvx --from "https://github.com/simoneb/directa-mcp/archive/refs/tags/<TAG>.tar.gz" directa-mcp
+```
+uvx --from "https://github.com/simoneb/directa-mcp/archive/refs/tags/<TAG>.tar.gz" directa-mcp
 ```
 
-**Claude Desktop** — add to `%APPDATA%\Claude\claude_desktop_config.json` and restart the app:
+Most clients take that as JSON, and the same block works across them:
 
 ```json
 {
@@ -45,9 +45,40 @@ claude mcp add directa --scope user -- uvx --from "https://github.com/simoneb/di
 }
 ```
 
+What changes is where that block goes:
+
+| Client | File |
+|---|---|
+| Claude Desktop | `%APPDATA%\Claude\claude_desktop_config.json`, or `~/Library/Application Support/Claude/` on macOS |
+| Cursor | `~/.cursor/mcp.json`, or `.cursor/mcp.json` for one project |
+| Windsurf | `~/.codeium/windsurf/mcp_config.json` |
+| Gemini CLI | `~/.gemini/settings.json`, or `.gemini/settings.json` for one project |
+
+Two clients want a different shape:
+
+- **VS Code** keys it under `servers` rather than `mcpServers` and expects `"type": "stdio"` next to `command`, in `.vscode/mcp.json` or the profile file that **MCP: Open User Configuration** opens.
+- **Codex CLI** takes TOML in `~/.codex/config.toml`:
+
+  ```toml
+  [mcp_servers.directa]
+  command = "uvx"
+  args = ["--from", "https://github.com/simoneb/directa-mcp/archive/refs/tags/<TAG>.tar.gz", "directa-mcp"]
+
+  [mcp_servers.directa.env]
+  DIRECTA_ENABLE_ORDERS = "false"
+  ```
+
+Several clients will write the entry themselves, which spares you the shape entirely — `claude mcp add`, `codex mcp add`, `code --add-mcp`, or a guided **Add Server** command. For instance:
+
+```
+claude mcp add directa --scope user -- uvx --from "https://github.com/simoneb/directa-mcp/archive/refs/tags/<TAG>.tar.gz" directa-mcp
+```
+
+Restart the client afterwards if it does not pick the server up on its own.
+
 Pin a tag rather than a branch: without one every start would pull the tip of `master`, which is not what you want from a tool that talks to your account. To upgrade, change the tag.
 
-Prefer the archive URL over `git+https://…`. The git form makes `uvx` shell out to `git`, and Claude Desktop starts MCP servers with no `PATHEXT` in the environment — so the executable lookup fails with `Git executable not found` even where git is installed and on `PATH`.
+Prefer the archive URL over `git+https://…`. The git form makes `uvx` shell out to `git`, and a client that hands the server a minimal environment can leave it unable to find one: Claude Desktop passes no `PATHEXT`, so the lookup fails with `Git executable not found` even where git is installed and on `PATH`. The archive needs neither git nor credentials.
 
 **Working from source** (to develop the server, not to use it):
 
@@ -57,11 +88,7 @@ uv pip install -e ".[dev]"
 pytest
 ```
 
-Tests run against a fake Darwin over sockets, so the platform need not be running. Then register the venv's Python by absolute path — Claude starts the process with its own environment, without the venv active:
-
-```powershell
-claude mcp add directa-dev --scope user -- <repo>\.venv\Scripts\python.exe -m directa_mcp.server
-```
+Tests run against a fake Darwin over sockets, so the platform need not be running. Register the venv's Python by absolute path, since the client starts the process with its own environment and no venv active — `<repo>\.venv\Scripts\python.exe` with arguments `-m directa_mcp.server`, in place of the `uvx` command above.
 
 ## Usage
 
@@ -69,7 +96,7 @@ The tools describe themselves, so ask in plain language: how the portfolio is do
 
 Current prices for arbitrary symbols, and charts, do not work without the datafeed entitlement. Prices for **your** positions do — those are derived from the portfolio.
 
-Don't ask Claude to compute values from `get_positions`: `quantity × price` is wrong by 100× on bonds. `get_portfolio_overview` handles the convention and reconciles its own arithmetic against Darwin's figures; when `reconciliation.reconciled` is false the totals are not to be presented as fact.
+Don't ask the model to compute values from `get_positions`: `quantity × price` is wrong by 100× on bonds. `get_portfolio_overview` handles the convention and reconciles its own arithmetic against Darwin's figures; when `reconciliation.reconciled` is false the totals are not to be presented as fact.
 
 ## The order gate
 

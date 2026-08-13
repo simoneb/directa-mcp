@@ -77,7 +77,7 @@ def _spawn(path: Path) -> int:
     Detaching matters more than it looks. An MCP server is a child process the
     client starts and kills, and on Windows it may be held in a job object that
     takes its whole tree down on exit — which would close Darwin, possibly with
-    working orders on the book, the moment the user quits Claude. Breaking away
+    working orders on the book, the moment the user quits the client. Breaking away
     from the job is tried first and allowed to fail, since not every job permits
     it; a Darwin tied to the client's lifetime is still better than no Darwin.
 
