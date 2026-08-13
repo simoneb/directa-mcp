@@ -34,8 +34,10 @@ jobs:
       - uses: astral-sh/setup-uv@v5
         with:
           python-version: '3.13'
-      - run: uv pip install --system -e ".[dev]"
-      - run: pytest -q
+      # Same explicit environment as ci.yml, for the same two reasons.
+      - run: uv venv
+      - run: uv pip install -e ".[dev]"
+      - run: uv run pytest -q
 
   build:
     needs: test
