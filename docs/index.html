@@ -3,155 +3,468 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>directa-mcp</title>
-<meta name="description" content="MCP server exposing Directa SIM's Darwin API (dAPI) — positions, balance, orders, historical data.">
+<title>directa-mcp — Darwin's dAPI, decoded</title>
+<meta name="description" content="A local MCP server that speaks Directa SIM's Darwin API: positions, balance, orders, candles and ticks.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Archivo:wght@500;600;700&family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500&display=swap" rel="stylesheet">
 <style>
   :root {
-    --bg: #fbfaf8; --fg: #1c1b19; --muted: #6b6862; --line: #e3dfd8;
-    --card: #ffffff; --accent: #7a4b2a; --warn-bg: #fdf5ec; --warn-line: #e0c9a8;
-    --code-bg: #f4f1ec;
+    /* Ink, not black: Darwin is a terminal from an era of blue-grey CRTs. */
+    --ink:        #0d1a26;
+    --ink-soft:   #3d4d5c;
+    --ink-faint:  #6e7d8b;
+    --paper:      #e9edf1;
+    --paper-up:   #f6f8fa;
+    --rule:       #ccd5dd;
+    /* The only two accents on the page, and they mean something:
+       reads are safe, anything that reaches the market is not. */
+    --safe:       #106b56;
+    --signal:     #bf2f16;
+    --wire-bg:    #0d1a26;
+    --wire-fg:    #cfe0ee;
+    --wire-dim:   #5f7386;
+    --wire-rule:  #1e2f3f;
+
+    --display: Archivo, "Helvetica Neue", Arial, sans-serif;
+    --body: "IBM Plex Sans", -apple-system, "Segoe UI", system-ui, sans-serif;
+    --mono: "IBM Plex Mono", ui-monospace, Consolas, monospace;
   }
   @media (prefers-color-scheme: dark) {
     :root {
-      --bg: #171614; --fg: #eae7e1; --muted: #9b968d; --line: #2e2c28;
-      --card: #1e1d1a; --accent: #d59b6a; --warn-bg: #241d14; --warn-line: #4a3a24;
-      --code-bg: #232120;
+      --ink:       #dde7ef;
+      --ink-soft:  #a3b3c1;
+      --ink-faint: #758492;
+      --paper:     #0a141d;
+      --paper-up:  #101d29;
+      --rule:      #1f303e;
+      --safe:      #4cb79b;
+      --signal:    #e8674a;
+      --wire-bg:   #14232f;
+      --wire-rule: #2b3f4f;
     }
   }
+
   * { box-sizing: border-box; }
+  html { -webkit-text-size-adjust: 100%; }
   body {
-    margin: 0; padding: 3rem 1.25rem 5rem; background: var(--bg); color: var(--fg);
-    font: 16px/1.6 ui-sans-serif, -apple-system, "Segoe UI", system-ui, sans-serif;
+    margin: 0; background: var(--paper); color: var(--ink);
+    font-family: var(--body); font-size: 16px; line-height: 1.65;
   }
-  main { max-width: 46rem; margin: 0 auto; }
-  h1 { font-size: 1.9rem; margin: 0 0 .3rem; letter-spacing: -.02em; }
-  h2 { font-size: 1.1rem; margin: 2.5rem 0 .75rem; letter-spacing: -.01em; }
-  p, li { color: var(--fg); }
-  .lede { color: var(--muted); margin: 0 0 .5rem; }
-  .version { font-size: .85rem; color: var(--muted); font-variant-numeric: tabular-nums; }
-  .version a { color: var(--accent); }
-  a { color: var(--accent); }
-  code, pre { font-family: ui-monospace, SFMono-Regular, "Cascadia Code", Consolas, monospace; }
-  code { background: var(--code-bg); padding: .1em .35em; border-radius: 4px; font-size: .9em; }
-  pre {
-    background: var(--code-bg); border: 1px solid var(--line); border-radius: 8px;
-    padding: .9rem 1rem; overflow-x: auto; font-size: .82rem; line-height: 1.5; margin: 0;
+  .wrap { max-width: 68rem; margin: 0 auto; padding: 0 1.5rem; }
+  a { color: inherit; text-decoration-thickness: 1px; text-underline-offset: 3px; }
+  a:focus-visible, button:focus-visible {
+    outline: 2px solid var(--signal); outline-offset: 3px;
   }
-  pre code { background: none; padding: 0; font-size: inherit; }
-  .block { margin: 0 0 1rem; }
-  .block-head {
-    display: flex; align-items: center; justify-content: space-between;
-    gap: 1rem; margin-bottom: .4rem;
+
+  /* ---- labels: mono, small caps-ish, used for every structural marker ---- */
+  .label {
+    font-family: var(--mono); font-size: .68rem; font-weight: 500;
+    letter-spacing: .14em; text-transform: uppercase; color: var(--ink-faint);
   }
-  .block-head h3 { font-size: .95rem; margin: 0; font-weight: 600; }
+
+  /* ---- masthead ---- */
+  header { border-bottom: 1px solid var(--rule); }
+  .masthead {
+    display: flex; align-items: baseline; justify-content: space-between;
+    gap: 1rem; flex-wrap: wrap; padding: 1.1rem 0;
+  }
+  .wordmark {
+    font-family: var(--mono); font-size: .95rem; font-weight: 600;
+    letter-spacing: -.01em; margin: 0;
+  }
+  .wordmark span { color: var(--ink-faint); font-weight: 400; }
+  .masthead nav { display: flex; gap: 1.25rem; }
+  .masthead nav a { font-family: var(--mono); font-size: .78rem; text-decoration: none; color: var(--ink-soft); }
+  .masthead nav a:hover { color: var(--ink); text-decoration: underline; }
+
+  /* ---- hero ---- */
+  .hero { padding: 4rem 0 3.5rem; display: grid; gap: 3rem; grid-template-columns: minmax(0, 1fr); }
+  @media (min-width: 62rem) {
+    .hero { grid-template-columns: minmax(0, 27rem) minmax(0, 1fr); align-items: start; gap: 4rem; }
+  }
+  h1 {
+    font-family: var(--display); font-weight: 600;
+    font-size: clamp(2.3rem, 5.4vw, 3.4rem); line-height: 1.04;
+    letter-spacing: -.035em; margin: .6rem 0 1rem;
+  }
+  h1 em { font-style: normal; color: var(--ink-faint); }
+  .thesis { font-size: 1.05rem; color: var(--ink-soft); margin: 0 0 1.75rem; max-width: 34ch; }
+
+  .release { display: flex; align-items: center; gap: .5rem; margin: 0 0 1.5rem; }
+  .release .tag {
+    font-family: var(--mono); font-size: .8rem; font-weight: 600;
+    border: 1px solid var(--rule); border-radius: 999px; padding: .12rem .6rem;
+    text-decoration: none;
+  }
+  .release .when { font-family: var(--mono); font-size: .72rem; color: var(--ink-faint); }
+
+  .cta { display: flex; flex-wrap: wrap; gap: .6rem; }
   .btn {
-    font: inherit; font-size: .82rem; padding: .3rem .7rem; cursor: pointer;
-    background: var(--card); color: var(--fg); border: 1px solid var(--line);
-    border-radius: 6px; white-space: nowrap;
+    font-family: var(--mono); font-size: .82rem; font-weight: 500;
+    padding: .55rem .95rem; border-radius: 3px; cursor: pointer;
+    border: 1px solid var(--ink); background: transparent; color: var(--ink);
+    text-decoration: none; display: inline-flex; align-items: center; gap: .45rem;
+    transition: background .12s, color .12s;
   }
-  .btn:hover { border-color: var(--accent); color: var(--accent); }
-  .btn.primary { background: var(--accent); color: var(--bg); border-color: var(--accent); }
-  .btn.primary:hover { opacity: .9; color: var(--bg); }
-  .actions { display: flex; flex-wrap: wrap; gap: .6rem; margin: 1rem 0 0; }
-  table { border-collapse: collapse; width: 100%; font-size: .9rem; }
-  th, td { text-align: left; padding: .5rem .6rem; border-bottom: 1px solid var(--line); }
-  th { font-weight: 600; color: var(--muted); font-size: .8rem; text-transform: uppercase; letter-spacing: .04em; }
-  td code { font-size: .82em; }
-  .warn {
-    background: var(--warn-bg); border: 1px solid var(--warn-line);
-    border-radius: 8px; padding: .9rem 1rem; margin: 1.25rem 0; font-size: .92rem;
+  .btn:hover { background: var(--ink); color: var(--paper); }
+  .btn-fill { background: var(--ink); color: var(--paper); }
+  .btn-fill:hover { background: var(--ink-soft); border-color: var(--ink-soft); }
+  .ico { width: 1em; height: 1em; fill: currentColor; flex: none; }
+  .btn .ico { width: 1.05em; height: 1.05em; }
+  .where td:first-child { display: flex; align-items: center; gap: .5rem; }
+  .where .ico { color: var(--ink-faint); }
+  .snip header .label { display: inline-flex; align-items: center; gap: .45rem; }
+  .snip header .label .ico { color: var(--ink-faint); }
+
+  .needs {
+    font-family: var(--mono); font-size: .72rem; color: var(--ink-faint);
+    margin: 1rem 0 0; line-height: 1.7;
   }
-  .warn strong { color: var(--accent); }
-  footer { margin-top: 3.5rem; padding-top: 1.25rem; border-top: 1px solid var(--line); font-size: .85rem; color: var(--muted); }
-  .muted { color: var(--muted); font-size: .9rem; }
+  .needs a { color: var(--ink-soft); }
+
+  /* ---- the wire: the signature element ---- */
+  .wire {
+    min-width: 0;
+    background: var(--wire-bg); color: var(--wire-fg); border-radius: 4px;
+    font-family: var(--mono); font-size: clamp(.7rem, 1.55vw, .82rem);
+    line-height: 1.85; padding: 1.1rem 1.2rem 1.3rem; overflow-x: auto;
+    border: 1px solid var(--wire-rule);
+    box-shadow: 0 22px 45px -30px rgba(13, 26, 38, .55);
+  }
+  .wire-head {
+    display: flex; justify-content: space-between; gap: 1rem;
+    border-bottom: 1px solid var(--wire-rule); padding-bottom: .7rem; margin-bottom: .8rem;
+    color: var(--wire-dim); font-size: .68rem; letter-spacing: .12em; text-transform: uppercase;
+  }
+  .wire pre { margin: 0; font: inherit; white-space: pre; }
+  .wire .sent { color: #7fd4b8; }
+  .wire .sent::before { content: "› "; color: var(--wire-dim); }
+  .wire .recv { color: var(--wire-fg); }
+  .wire .dim { color: var(--wire-dim); }
+  .wire .field { color: #f2b45e; }
+  .wire .note {
+    display: block; color: var(--wire-dim); font-size: .92em;
+    padding-left: 1.1rem; text-indent: -1.1rem;
+  }
+  .wire .note b { color: #f2b45e; font-weight: 500; }
+  .caret {
+    display: inline-block; width: .55em; height: 1.05em; vertical-align: -.18em;
+    background: #7fd4b8; animation: blink 1.05s step-end infinite;
+  }
+  @keyframes blink { 50% { opacity: 0; } }
+  @media (prefers-reduced-motion: reduce) { .caret { animation: none; } }
+
+  /* ---- sections ---- */
+  section { border-top: 1px solid var(--rule); padding: 3.25rem 0; }
+  .sec-head { margin-bottom: 1.75rem; }
+  .sec-head h2 {
+    font-family: var(--display); font-weight: 600; font-size: 1.45rem;
+    letter-spacing: -.02em; margin: .35rem 0 .4rem;
+  }
+  .sec-head p { color: var(--ink-soft); margin: 0; max-width: 62ch; font-size: .95rem; }
+
+  /* ---- install ---- */
+  .snips { display: grid; gap: 1.25rem; grid-template-columns: minmax(0, 1fr); }
+  @media (min-width: 54rem) { .snips { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); } }
+  .snip { border: 1px solid var(--rule); border-radius: 4px; background: var(--paper-up); overflow: hidden; }
+  .snip.wide { grid-column: 1 / -1; }
+  .snip header {
+    display: flex; align-items: center; justify-content: space-between; gap: 1rem;
+    padding: .6rem .8rem; border-bottom: 1px solid var(--rule); border-top: 0;
+  }
+  .snip header .label { color: var(--ink-soft); }
+  .snip pre {
+    margin: 0; padding: .85rem .9rem; overflow-x: auto;
+    font-family: var(--mono); font-size: .76rem; line-height: 1.7; color: var(--ink);
+  }
+  .copy {
+    font-family: var(--mono); font-size: .68rem; letter-spacing: .08em; text-transform: uppercase;
+    background: none; border: 0; color: var(--ink-faint); cursor: pointer; padding: .2rem .1rem;
+  }
+  .copy:hover { color: var(--ink); }
+  .copy[data-done="1"] { color: var(--safe); }
+
+  .where { margin-top: 1.5rem; width: 100%; border-collapse: collapse; }
+  .where th, .where td { text-align: left; padding: .5rem .5rem; border-bottom: 1px solid var(--rule); vertical-align: top; }
+  .where th { font-family: var(--mono); font-size: .68rem; letter-spacing: .12em; text-transform: uppercase; color: var(--ink-faint); font-weight: 500; }
+  .where td:first-child { font-family: var(--mono); font-size: .8rem; white-space: nowrap; padding-right: 1.25rem; }
+  .where code { font-family: var(--mono); font-size: .76rem; color: var(--ink-soft); word-break: break-all; }
+  .aside { font-family: var(--mono); font-size: .72rem; color: var(--ink-faint); margin: 1.1rem 0 0; }
+
+  /* ---- tools, split by what they can touch ---- */
+  .tools { display: grid; gap: 2rem; grid-template-columns: minmax(0, 1fr); }
+  @media (min-width: 54rem) { .tools { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 3rem; } }
+  .tools h3 {
+    font-family: var(--mono); font-size: .72rem; letter-spacing: .14em; text-transform: uppercase;
+    margin: 0 0 .2rem; display: flex; align-items: center; gap: .5rem;
+  }
+  .tools .tick { width: .55rem; height: .55rem; border-radius: 50%; flex: none; }
+  .reads .tick { background: var(--safe); }
+  .writes .tick { background: var(--signal); }
+  .tools .caption { font-size: .88rem; color: var(--ink-soft); margin: 0 0 1rem; }
+  .tools ul { list-style: none; margin: 0; padding: 0; }
+  .tools li {
+    display: grid; grid-template-columns: 1fr; gap: .1rem;
+    padding: .55rem 0; border-top: 1px solid var(--rule);
+  }
+  .tools li code { font-family: var(--mono); font-size: .8rem; }
+  .tools li span { font-size: .85rem; color: var(--ink-soft); }
+  .reads li code { color: var(--safe); }
+  .writes li code { color: var(--signal); }
+
+  .gate {
+    margin-top: 2rem; border-left: 2px solid var(--signal); padding: .2rem 0 .2rem 1rem;
+    font-size: .93rem; max-width: 68ch;
+  }
+  .gate strong { color: var(--signal); }
+  .gate p { margin: 0 0 .6rem; }
+  .gate p:last-child { margin-bottom: 0; }
+
+  /* ---- traps, drawn as wire lines ---- */
+  .trap { margin: 0 0 1.75rem; }
+  .trap:last-child { margin-bottom: 0; }
+  .trap h3 { font-family: var(--display); font-size: 1rem; font-weight: 600; margin: 0 0 .5rem; letter-spacing: -.01em; }
+  .trap pre {
+    margin: 0 0 .55rem; padding: .7rem .8rem; overflow-x: auto; border-radius: 3px;
+    background: var(--wire-bg); color: var(--wire-fg);
+    font-family: var(--mono); font-size: .76rem; line-height: 1.6;
+  }
+  .trap pre b { color: #f2b45e; font-weight: 500; }
+  .trap p { margin: 0; font-size: .92rem; color: var(--ink-soft); max-width: 68ch; }
+  .trap p b { color: var(--ink); font-weight: 500; }
+
+  footer {
+    border-top: 1px solid var(--rule); padding: 2rem 0 3rem;
+    font-family: var(--mono); font-size: .72rem; color: var(--ink-faint);
+    display: flex; flex-wrap: wrap; gap: .4rem 1.25rem;
+  }
+  footer a { color: var(--ink-soft); }
 </style>
 </head>
 <body>
-<main>
-  <h1>directa-mcp</h1>
-  <p class="lede">Directa SIM's Darwin API (dAPI) as MCP tools — positions, balance, orders, candles and ticks.</p>
-  <p class="version">Latest release <a id="rel-link" href="https://github.com/simoneb/directa-mcp/releases"><span id="tag">…</span></a> · <span id="rel-date"></span></p>
 
-  <p>Darwin listens on <code>127.0.0.1</code> only while it is running and logged in, so this is a <strong>local</strong> server: your client starts it on the same machine, and nothing is sent to Directa over the internet. There are no API keys — the authentication is Darwin being logged in.</p>
-
-  <p class="muted">You need Darwin (with API access enabled under <em>Sviluppatori&nbsp;&gt;&nbsp;Dev kit</em>) and <a href="https://docs.astral.sh/uv/">uv</a>. Candles and ticks additionally need Directa's real-time data entitlement.</p>
-
-  <h2>Install</h2>
-
-  <div class="actions">
-    <a class="btn primary" id="mcpb" href="https://github.com/simoneb/directa-mcp/releases/latest">Claude Desktop — download extension</a>
-    <a class="btn" id="vscode" href="#">Install in VS Code</a>
+<header>
+  <div class="wrap masthead">
+    <p class="wordmark">directa-mcp <span>· 127.0.0.1:10002</span></p>
+    <nav>
+      <a href="#install">Install</a>
+      <a href="#tools">Tools</a>
+      <a href="https://github.com/simoneb/directa-mcp/blob/master/docs/PROTOCOL.md">Protocol</a>
+      <a href="https://github.com/simoneb/directa-mcp">Source</a>
+    </nav>
   </div>
-  <p class="muted" style="margin-top:.6rem">The Claude Desktop extension installs by double-clicking the downloaded file, and puts both switches below in its settings panel.</p>
+</header>
 
-  <h2>Or configure it by hand</h2>
+<div class="wrap">
+  <div class="hero">
+    <div>
+      <p class="label">Model Context Protocol server</p>
+      <h1>Darwin's dAPI,<br>read out loud.</h1>
+      <p class="thesis">Your portfolio, balance, orders, candles and ticks — handed to an AI client that runs on your machine, next to the terminal that already holds them.</p>
 
-  <div class="block">
-    <div class="block-head">
-      <h3>Claude Desktop · Cursor · Windsurf · Gemini CLI</h3>
-      <button class="btn" data-copy="json">Copy</button>
+      <p class="release">
+        <a class="tag" id="rel-link" href="https://github.com/simoneb/directa-mcp/releases"><span id="tag">…</span></a>
+        <span class="when" id="rel-date"></span>
+      </p>
+
+      <div class="cta">
+        <a class="btn btn-fill" id="mcpb" href="https://github.com/simoneb/directa-mcp/releases/latest"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="m4.7144 15.9555 4.7174-2.6471.079-.2307-.079-.1275h-.2307l-.7893-.0486-2.6956-.0729-2.3375-.0971-2.2646-.1214-.5707-.1215-.5343-.7042.0546-.3522.4797-.3218.686.0608 1.5179.1032 2.2767.1578 1.6514.0972 2.4468.255h.3886l.0546-.1579-.1336-.0971-.1032-.0972L6.973 9.8356l-2.55-1.6879-1.3356-.9714-.7225-.4918-.3643-.4614-.1578-1.0078.6557-.7225.8803.0607.2246.0607.8925.686 1.9064 1.4754 2.4893 1.8336.3643.3035.1457-.1032.0182-.0728-.164-.2733-1.3539-2.4467-1.445-2.4893-.6435-1.032-.17-.6194c-.0607-.255-.1032-.4674-.1032-.7285L6.287.1335 6.6997 0l.9957.1336.419.3642.6192 1.4147 1.0018 2.2282 1.5543 3.0296.4553.8985.2429.8318.091.255h.1579v-.1457l.1275-1.706.2368-2.0947.2307-2.6957.0789-.7589.3764-.9107.7468-.4918.5828.2793.4797.686-.0668.4433-.2853 1.8517-.5586 2.9021-.3643 1.9429h.2125l.2429-.2429.9835-1.3053 1.6514-2.0643.7286-.8196.85-.9046.5464-.4311h1.0321l.759 1.1293-.34 1.1657-1.0625 1.3478-.8804 1.1414-1.2628 1.7-.7893 1.36.0729.1093.1882-.0183 2.8535-.607 1.5421-.2794 1.8396-.3157.8318.3886.091.3946-.3278.8075-1.967.4857-2.3072.4614-3.4364.8136-.0425.0304.0486.0607 1.5482.1457.6618.0364h1.621l3.0175.2247.7892.522.4736.6376-.079.4857-1.2142.6193-1.6393-.3886-3.825-.9107-1.3113-.3279h-.1822v.1093l1.0929 1.0686 2.0035 1.8092 2.5075 2.3314.1275.5768-.3218.4554-.34-.0486-2.2039-1.6575-.85-.7468-1.9246-1.621h-.1275v.17l.4432.6496 2.3436 3.5214.1214 1.0807-.17.3521-.6071.2125-.6679-.1214-1.3721-1.9246L14.38 17.959l-1.1414-1.9428-.1397.079-.674 7.2552-.3156.3703-.7286.2793-.6071-.4614-.3218-.7468.3218-1.4753.3886-1.9246.3157-1.53.2853-1.9004.17-.6314-.0121-.0425-.1397.0182-1.4328 1.9672-2.1796 2.9446-1.7243 1.8456-.4128.164-.7164-.3704.0667-.6618.4008-.5889 2.386-3.0357 1.4389-1.882.929-1.0868-.0062-.1579h-.0546l-6.3385 4.1164-1.1293.1457-.4857-.4554.0608-.7467.2307-.2429 1.9064-1.3114Z"/></svg>Add to Claude Desktop</a>
+        <a class="btn" id="vscode" href="#"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M23.15 2.587L18.21.21a1.494 1.494 0 0 0-1.705.29l-9.46 8.63-4.12-3.128a.999.999 0 0 0-1.276.057L.327 7.261A1 1 0 0 0 .326 8.74L3.899 12 .326 15.26a1 1 0 0 0 .001 1.479L1.65 17.94a.999.999 0 0 0 1.276.057l4.12-3.128 9.46 8.63a1.492 1.492 0 0 0 1.704.29l4.942-2.377A1.5 1.5 0 0 0 24 20.06V3.939a1.5 1.5 0 0 0-.85-1.352zm-5.146 14.861L10.826 12l7.178-5.448v10.896z"/></svg>Add to VS Code</a>
+      </div>
+
+      <p class="needs">
+        Needs Darwin running and logged in, with API access on under
+        <em>Sviluppatori&nbsp;›&nbsp;Dev kit</em>, plus <a href="https://docs.astral.sh/uv/">uv</a>.<br>
+        Candles and ticks need Directa's real-time data entitlement.
+      </p>
     </div>
-    <pre><code id="json">…</code></pre>
-  </div>
 
-  <div class="block">
-    <div class="block-head">
-      <h3>Codex CLI — <code>~/.codex/config.toml</code></h3>
-      <button class="btn" data-copy="toml">Copy</button>
+    <!-- The signature: the actual exchange this server had to decode. -->
+    <div class="wire" aria-label="A recorded dAPI session on the trading port">
+      <div class="wire-head"><span>trading port · 10002</span><span>latin-1 · CRLF</span></div>
+      <pre id="tape" aria-live="off"></pre>
     </div>
-    <pre><code id="toml">…</code></pre>
   </div>
+</div>
 
-  <div class="block">
-    <div class="block-head">
-      <h3>Command line</h3>
-      <button class="btn" data-copy="cli">Copy</button>
+<section id="install">
+  <div class="wrap">
+    <div class="sec-head">
+      <p class="label">Install</p>
+      <h2>One command, wherever you put it</h2>
+      <p>Every client is asking for the same thing: how to start the server. The snippets below carry the current release, so there is no tag to look up.</p>
     </div>
-    <pre><code id="cli">…</code></pre>
+
+    <div class="snips">
+      <div class="snip wide">
+        <header>
+          <span class="label"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="m4.7144 15.9555 4.7174-2.6471.079-.2307-.079-.1275h-.2307l-.7893-.0486-2.6956-.0729-2.3375-.0971-2.2646-.1214-.5707-.1215-.5343-.7042.0546-.3522.4797-.3218.686.0608 1.5179.1032 2.2767.1578 1.6514.0972 2.4468.255h.3886l.0546-.1579-.1336-.0971-.1032-.0972L6.973 9.8356l-2.55-1.6879-1.3356-.9714-.7225-.4918-.3643-.4614-.1578-1.0078.6557-.7225.8803.0607.2246.0607.8925.686 1.9064 1.4754 2.4893 1.8336.3643.3035.1457-.1032.0182-.0728-.164-.2733-1.3539-2.4467-1.445-2.4893-.6435-1.032-.17-.6194c-.0607-.255-.1032-.4674-.1032-.7285L6.287.1335 6.6997 0l.9957.1336.419.3642.6192 1.4147 1.0018 2.2282 1.5543 3.0296.4553.8985.2429.8318.091.255h.1579v-.1457l.1275-1.706.2368-2.0947.2307-2.6957.0789-.7589.3764-.9107.7468-.4918.5828.2793.4797.686-.0668.4433-.2853 1.8517-.5586 2.9021-.3643 1.9429h.2125l.2429-.2429.9835-1.3053 1.6514-2.0643.7286-.8196.85-.9046.5464-.4311h1.0321l.759 1.1293-.34 1.1657-1.0625 1.3478-.8804 1.1414-1.2628 1.7-.7893 1.36.0729.1093.1882-.0183 2.8535-.607 1.5421-.2794 1.8396-.3157.8318.3886.091.3946-.3278.8075-1.967.4857-2.3072.4614-3.4364.8136-.0425.0304.0486.0607 1.5482.1457.6618.0364h1.621l3.0175.2247.7892.522.4736.6376-.079.4857-1.2142.6193-1.6393-.3886-3.825-.9107-1.3113-.3279h-.1822v.1093l1.0929 1.0686 2.0035 1.8092 2.5075 2.3314.1275.5768-.3218.4554-.34-.0486-2.2039-1.6575-.85-.7468-1.9246-1.621h-.1275v.17l.4432.6496 2.3436 3.5214.1214 1.0807-.17.3521-.6071.2125-.6679-.1214-1.3721-1.9246L14.38 17.959l-1.1414-1.9428-.1397.079-.674 7.2552-.3156.3703-.7286.2793-.6071-.4614-.3218-.7468.3218-1.4753.3886-1.9246.3157-1.53.2853-1.9004.17-.6314-.0121-.0425-.1397.0182-1.4328 1.9672-2.1796 2.9446-1.7243 1.8456-.4128.164-.7164-.3704.0667-.6618.4008-.5889 2.386-3.0357 1.4389-1.882.929-1.0868-.0062-.1579h-.0546l-6.3385 4.1164-1.1293.1457-.4857-.4554.0608-.7467.2307-.2429 1.9064-1.3114Z"/></svg><svg class="ico" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M11.503.131 1.891 5.678a.84.84 0 0 0-.42.726v11.188c0 .3.162.575.42.724l9.609 5.55a1 1 0 0 0 .998 0l9.61-5.55a.84.84 0 0 0 .42-.724V6.404a.84.84 0 0 0-.42-.726L12.497.131a1.01 1.01 0 0 0-.996 0M2.657 6.338h18.55c.263 0 .43.287.297.515L12.23 22.918c-.062.107-.229.064-.229-.06V12.335a.59.59 0 0 0-.295-.51l-9.11-5.257c-.109-.063-.064-.23.061-.23"/></svg><svg class="ico" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M23.55 5.067c-1.2038-.002-2.1806.973-2.1806 2.1765v4.8676c0 .972-.8035 1.7594-1.7597 1.7594-.568 0-1.1352-.286-1.4718-.7659l-4.9713-7.1003c-.4125-.5896-1.0837-.941-1.8103-.941-1.1334 0-2.1533.9635-2.1533 2.153v4.8957c0 .972-.7969 1.7594-1.7596 1.7594-.57 0-1.1363-.286-1.4728-.7658L.4076 5.1598C.2822 4.9798 0 5.0688 0 5.2882v4.2452c0 .2147.0656.4228.1884.599l5.4748 7.8183c.3234.462.8006.8052 1.3509.9298 1.3771.313 2.6446-.747 2.6446-2.0977v-4.893c0-.972.7875-1.7593 1.7596-1.7593h.003a1.798 1.798 0 0 1 1.4718.7658l4.9723 7.0994c.4135.5905 1.05.941 1.8093.941 1.1587 0 2.1515-.9645 2.1515-2.153v-4.8948c0-.972.7875-1.7594 1.7596-1.7594h.194a.22.22 0 0 0 .2204-.2202v-4.622a.22.22 0 0 0-.2203-.2203Z"/></svg><svg class="ico" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M11.04 19.32Q12 21.51 12 24q0-2.49.93-4.68.96-2.19 2.58-3.81t3.81-2.55Q21.51 12 24 12q-2.49 0-4.68-.93a12.3 12.3 0 0 1-3.81-2.58 12.3 12.3 0 0 1-2.58-3.81Q12 2.49 12 0q0 2.49-.96 4.68-.93 2.19-2.55 3.81a12.3 12.3 0 0 1-3.81 2.58Q2.49 12 0 12q2.49 0 4.68.96 2.19.93 3.81 2.55t2.55 3.81"/></svg> Four clients, one block</span>
+          <button class="copy" data-copy="json">Copy</button>
+        </header>
+        <pre><code id="json">…</code></pre>
+      </div>
+
+      <div class="snip">
+        <header>
+          <span class="label"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M22.2819 9.8211a5.9847 5.9847 0 0 0-.5157-4.9108 6.0462 6.0462 0 0 0-6.5098-2.9A6.0651 6.0651 0 0 0 4.9807 4.1818a5.9847 5.9847 0 0 0-3.9977 2.9 6.0462 6.0462 0 0 0 .7427 7.0966 5.98 5.98 0 0 0 .511 4.9107 6.051 6.051 0 0 0 6.5146 2.9001A5.9847 5.9847 0 0 0 13.2599 24a6.0557 6.0557 0 0 0 5.7718-4.2058 5.9894 5.9894 0 0 0 3.9977-2.9001 6.0557 6.0557 0 0 0-.7475-7.0729zm-9.022 12.6081a4.4755 4.4755 0 0 1-2.8764-1.0408l.1419-.0804 4.7783-2.7582a.7948.7948 0 0 0 .3927-.6813v-6.7369l2.02 1.1686a.071.071 0 0 1 .038.052v5.5826a4.504 4.504 0 0 1-4.4945 4.4944zm-9.6607-4.1254a4.4708 4.4708 0 0 1-.5346-3.0137l.142.0852 4.783 2.7582a.7712.7712 0 0 0 .7806 0l5.8428-3.3685v2.3324a.0804.0804 0 0 1-.0332.0615L9.74 19.9502a4.4992 4.4992 0 0 1-6.1408-1.6464zM2.3408 7.8956a4.485 4.485 0 0 1 2.3655-1.9728V11.6a.7664.7664 0 0 0 .3879.6765l5.8144 3.3543-2.0201 1.1685a.0757.0757 0 0 1-.071 0l-4.8303-2.7865A4.504 4.504 0 0 1 2.3408 7.872zm16.5963 3.8558L13.1038 8.364 15.1192 7.2a.0757.0757 0 0 1 .071 0l4.8303 2.7913a4.4944 4.4944 0 0 1-.6765 8.1042v-5.6772a.79.79 0 0 0-.407-.667zm2.0107-3.0231l-.142-.0852-4.7735-2.7818a.7759.7759 0 0 0-.7854 0L9.409 9.2297V6.8974a.0662.0662 0 0 1 .0284-.0615l4.8303-2.7866a4.4992 4.4992 0 0 1 6.6802 4.66zM8.3065 12.863l-2.02-1.1638a.0804.0804 0 0 1-.038-.0567V6.0742a4.4992 4.4992 0 0 1 7.3757-3.4537l-.142.0805L8.704 5.459a.7948.7948 0 0 0-.3927.6813zm1.0976-2.3654l2.602-1.4998 2.6069 1.4998v2.9994l-2.5974 1.4997-2.6067-1.4997Z"/></svg> Codex CLI · ~/.codex/config.toml</span>
+          <button class="copy" data-copy="toml">Copy</button>
+        </header>
+        <pre><code id="toml">…</code></pre>
+      </div>
+
+      <div class="snip">
+        <header>
+          <span class="label">Or from a shell</span>
+          <button class="copy" data-copy="cli">Copy</button>
+        </header>
+        <pre><code id="cli">…</code></pre>
+      </div>
+    </div>
+
+    <table class="where">
+      <thead><tr><th>Client</th><th>Where the JSON goes</th></tr></thead>
+      <tbody>
+        <tr><td><svg class="ico" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="m4.7144 15.9555 4.7174-2.6471.079-.2307-.079-.1275h-.2307l-.7893-.0486-2.6956-.0729-2.3375-.0971-2.2646-.1214-.5707-.1215-.5343-.7042.0546-.3522.4797-.3218.686.0608 1.5179.1032 2.2767.1578 1.6514.0972 2.4468.255h.3886l.0546-.1579-.1336-.0971-.1032-.0972L6.973 9.8356l-2.55-1.6879-1.3356-.9714-.7225-.4918-.3643-.4614-.1578-1.0078.6557-.7225.8803.0607.2246.0607.8925.686 1.9064 1.4754 2.4893 1.8336.3643.3035.1457-.1032.0182-.0728-.164-.2733-1.3539-2.4467-1.445-2.4893-.6435-1.032-.17-.6194c-.0607-.255-.1032-.4674-.1032-.7285L6.287.1335 6.6997 0l.9957.1336.419.3642.6192 1.4147 1.0018 2.2282 1.5543 3.0296.4553.8985.2429.8318.091.255h.1579v-.1457l.1275-1.706.2368-2.0947.2307-2.6957.0789-.7589.3764-.9107.7468-.4918.5828.2793.4797.686-.0668.4433-.2853 1.8517-.5586 2.9021-.3643 1.9429h.2125l.2429-.2429.9835-1.3053 1.6514-2.0643.7286-.8196.85-.9046.5464-.4311h1.0321l.759 1.1293-.34 1.1657-1.0625 1.3478-.8804 1.1414-1.2628 1.7-.7893 1.36.0729.1093.1882-.0183 2.8535-.607 1.5421-.2794 1.8396-.3157.8318.3886.091.3946-.3278.8075-1.967.4857-2.3072.4614-3.4364.8136-.0425.0304.0486.0607 1.5482.1457.6618.0364h1.621l3.0175.2247.7892.522.4736.6376-.079.4857-1.2142.6193-1.6393-.3886-3.825-.9107-1.3113-.3279h-.1822v.1093l1.0929 1.0686 2.0035 1.8092 2.5075 2.3314.1275.5768-.3218.4554-.34-.0486-2.2039-1.6575-.85-.7468-1.9246-1.621h-.1275v.17l.4432.6496 2.3436 3.5214.1214 1.0807-.17.3521-.6071.2125-.6679-.1214-1.3721-1.9246L14.38 17.959l-1.1414-1.9428-.1397.079-.674 7.2552-.3156.3703-.7286.2793-.6071-.4614-.3218-.7468.3218-1.4753.3886-1.9246.3157-1.53.2853-1.9004.17-.6314-.0121-.0425-.1397.0182-1.4328 1.9672-2.1796 2.9446-1.7243 1.8456-.4128.164-.7164-.3704.0667-.6618.4008-.5889 2.386-3.0357 1.4389-1.882.929-1.0868-.0062-.1579h-.0546l-6.3385 4.1164-1.1293.1457-.4857-.4554.0608-.7467.2307-.2429 1.9064-1.3114Z"/></svg>Claude Desktop</td><td><code>%APPDATA%\Claude\claude_desktop_config.json</code> · <code>~/Library/Application Support/Claude/</code></td></tr>
+        <tr><td><svg class="ico" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M11.503.131 1.891 5.678a.84.84 0 0 0-.42.726v11.188c0 .3.162.575.42.724l9.609 5.55a1 1 0 0 0 .998 0l9.61-5.55a.84.84 0 0 0 .42-.724V6.404a.84.84 0 0 0-.42-.726L12.497.131a1.01 1.01 0 0 0-.996 0M2.657 6.338h18.55c.263 0 .43.287.297.515L12.23 22.918c-.062.107-.229.064-.229-.06V12.335a.59.59 0 0 0-.295-.51l-9.11-5.257c-.109-.063-.064-.23.061-.23"/></svg>Cursor</td><td><code>~/.cursor/mcp.json</code>, or <code>.cursor/mcp.json</code> for one project</td></tr>
+        <tr><td><svg class="ico" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M23.55 5.067c-1.2038-.002-2.1806.973-2.1806 2.1765v4.8676c0 .972-.8035 1.7594-1.7597 1.7594-.568 0-1.1352-.286-1.4718-.7659l-4.9713-7.1003c-.4125-.5896-1.0837-.941-1.8103-.941-1.1334 0-2.1533.9635-2.1533 2.153v4.8957c0 .972-.7969 1.7594-1.7596 1.7594-.57 0-1.1363-.286-1.4728-.7658L.4076 5.1598C.2822 4.9798 0 5.0688 0 5.2882v4.2452c0 .2147.0656.4228.1884.599l5.4748 7.8183c.3234.462.8006.8052 1.3509.9298 1.3771.313 2.6446-.747 2.6446-2.0977v-4.893c0-.972.7875-1.7593 1.7596-1.7593h.003a1.798 1.798 0 0 1 1.4718.7658l4.9723 7.0994c.4135.5905 1.05.941 1.8093.941 1.1587 0 2.1515-.9645 2.1515-2.153v-4.8948c0-.972.7875-1.7594 1.7596-1.7594h.194a.22.22 0 0 0 .2204-.2202v-4.622a.22.22 0 0 0-.2203-.2203Z"/></svg>Windsurf</td><td><code>~/.codeium/windsurf/mcp_config.json</code></td></tr>
+        <tr><td><svg class="ico" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M11.04 19.32Q12 21.51 12 24q0-2.49.93-4.68.96-2.19 2.58-3.81t3.81-2.55Q21.51 12 24 12q-2.49 0-4.68-.93a12.3 12.3 0 0 1-3.81-2.58 12.3 12.3 0 0 1-2.58-3.81Q12 2.49 12 0q0 2.49-.96 4.68-.93 2.19-2.55 3.81a12.3 12.3 0 0 1-3.81 2.58Q2.49 12 0 12q2.49 0 4.68.96 2.19.93 3.81 2.55t2.55 3.81"/></svg>Gemini CLI</td><td><code>~/.gemini/settings.json</code></td></tr>
+        <tr><td><svg class="ico" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M23.15 2.587L18.21.21a1.494 1.494 0 0 0-1.705.29l-9.46 8.63-4.12-3.128a.999.999 0 0 0-1.276.057L.327 7.261A1 1 0 0 0 .326 8.74L3.899 12 .326 15.26a1 1 0 0 0 .001 1.479L1.65 17.94a.999.999 0 0 0 1.276.057l4.12-3.128 9.46 8.63a1.492 1.492 0 0 0 1.704.29l4.942-2.377A1.5 1.5 0 0 0 24 20.06V3.939a1.5 1.5 0 0 0-.85-1.352zm-5.146 14.861L10.826 12l7.178-5.448v10.896z"/></svg>VS Code</td><td><code>.vscode/mcp.json</code> — under <code>servers</code>, with <code>"type": "stdio"</code></td></tr>
+      </tbody>
+    </table>
+
+    <p class="aside">Darwin's sockets are local, so a client that only accepts remote HTTP servers cannot reach them — ChatGPT on web and desktop included. Codex CLI is the way in there.</p>
   </div>
+</section>
 
-  <table>
-    <thead><tr><th>Client</th><th>Where the JSON goes</th></tr></thead>
-    <tbody>
-      <tr><td>Claude Desktop</td><td><code>%APPDATA%\Claude\claude_desktop_config.json</code>, or <code>~/Library/Application&nbsp;Support/Claude/</code></td></tr>
-      <tr><td>Cursor</td><td><code>~/.cursor/mcp.json</code></td></tr>
-      <tr><td>Windsurf</td><td><code>~/.codeium/windsurf/mcp_config.json</code></td></tr>
-      <tr><td>Gemini CLI</td><td><code>~/.gemini/settings.json</code></td></tr>
-      <tr><td>VS Code</td><td><code>.vscode/mcp.json</code> — keyed under <code>servers</code>, with <code>"type": "stdio"</code></td></tr>
-    </tbody>
-  </table>
+<section id="tools">
+  <div class="wrap">
+    <div class="sec-head">
+      <p class="label">Surface</p>
+      <h2>Eighteen tools, split by what they can touch</h2>
+      <p>Each one ships the protocol's annotations, so your client can group them by permission and ask before the ones that matter — rather than treating a balance check and a market order as the same kind of thing.</p>
+    </div>
 
-  <p class="muted">ChatGPT on the web and desktop accepts only remote HTTP servers, so it cannot run this one; Codex CLI is the way in there.</p>
+    <div class="tools">
+      <div class="reads">
+        <h3><span class="tick"></span> Reads only</h3>
+        <p class="caption">Twelve tools that ask Darwin questions and change nothing.</p>
+        <ul>
+          <li><code>get_portfolio_overview</code><span>Positions with derived prices and value, totals, and a reconciliation check against Darwin's own figures</span></li>
+          <li><code>get_positions</code> <code>get_position</code><span>Open positions, as Darwin reports them</span></li>
+          <li><code>get_account_balance</code> <code>get_availability</code><span>Liquidity, open P&amp;L, equity, buying power with and without margin</span></li>
+          <li><code>get_orders</code><span>The day's orders with decoded state; the live ones on their own</span></li>
+          <li><code>check_connection</code> <code>get_darwin_status</code><span>Whether Darwin is up, and whether the datafeed is on. Needs no login</span></li>
+          <li><code>get_daily_candles</code> <code>get_intraday_candles</code> <code>get_candle_data_range</code> <code>get_tick_data</code><span>OHLC candles at any period, and tick-by-tick trades</span></li>
+        </ul>
+      </div>
 
-  <div class="warn">
-    <p style="margin:0"><strong>Orders are off until you turn them on.</strong> While <code>DIRECTA_ENABLE_ORDERS</code> is false, the tools that place, modify or cancel orders send nothing at all to Darwin. There is no simulated mode — the dAPI has no command that accepts an order without sending it to market, so with the flag on, orders are real, with real money.</p>
+      <div class="writes">
+        <h3><span class="tick"></span> Puts a command on the wire</h3>
+        <p class="caption">Six tools that reach the market, your money, or your desktop.</p>
+        <ul>
+          <li><code>preview_limit_order</code><span>What an order would cost — commission, amount, instrument — while placing nothing</span></li>
+          <li><code>place_limit_order</code><span>A real buy or sell limit, submitted and confirmed in one connection</span></li>
+          <li><code>modify_order</code> <code>cancel_order</code><span>Reprice or revoke a working order</span></li>
+          <li><code>cancel_all_orders</code><span>Revoke every order on one symbol. The symbol filter is verified</span></li>
+          <li><code>start_darwin</code><span>Launches dGO so you can log in. The OTP stays yours</span></li>
+        </ul>
+      </div>
+    </div>
+
+    <div class="gate">
+      <p><strong>Orders stay inert until you switch them on.</strong> With <code>DIRECTA_ENABLE_ORDERS</code> off, the four order tools send nothing at all to Darwin and say so.</p>
+      <p>There is no simulated mode, and that is the protocol's doing: the dAPI has no command that accepts an order without sending it to market, and Directa offers no test account. So the switch is a safety catch rather than a mode — it lives in the server's configuration, where the model cannot reach it. With it on, orders are real, with real money.</p>
+    </div>
   </div>
+</section>
 
-  <h2>What it exposes</h2>
-  <table>
-    <tbody>
-      <tr><td><code>check_connection</code>, <code>get_darwin_status</code></td><td>Whether Darwin is up, and whether the datafeed is enabled</td></tr>
-      <tr><td><code>get_positions</code>, <code>get_position</code>, <code>get_portfolio_overview</code></td><td>Positions, with derived prices and a reconciliation check against Darwin's own figures</td></tr>
-      <tr><td><code>get_account_balance</code>, <code>get_availability</code></td><td>Liquidity, open P&amp;L, equity, buying power</td></tr>
-      <tr><td><code>get_orders</code>, <code>preview_limit_order</code></td><td>The day's orders; what an order would cost without placing it</td></tr>
-      <tr><td><code>place_limit_order</code>, <code>modify_order</code>, <code>cancel_order</code>, <code>cancel_all_orders</code></td><td>Real orders — gated</td></tr>
-      <tr><td><code>get_daily_candles</code>, <code>get_intraday_candles</code>, <code>get_candle_data_range</code>, <code>get_tick_data</code></td><td>OHLC candles and ticks — need the datafeed entitlement</td></tr>
-      <tr><td><code>start_darwin</code></td><td>Launches dGO so you can log in; the OTP stays yours</td></tr>
-    </tbody>
-  </table>
-  <p class="muted">Every tool carries the protocol's annotations, so a client can group them by permission and ask for approval only where it matters.</p>
+<section id="traps">
+  <div class="wrap">
+    <div class="sec-head">
+      <p class="label">Read the wire carefully</p>
+      <h2>Two places the field names lie</h2>
+      <p>Both are handled in the client, and both are why a naive reading of these lines gets the numbers wrong by an order of magnitude.</p>
+    </div>
 
+    <div class="trap">
+      <h3>A bond's price is a percentage</h3>
+      <pre>STOCK;M.100001;10:00:00;<b>20000</b>;0;0;<b>95.0</b>;200</pre>
+      <p>Twenty thousand of nominal at 95.00% of it. The position is worth <b>€19,000</b> — not €1,900,000. Quantity times price is wrong by 100×.</p>
+    </div>
+
+    <div class="trap">
+      <h3>“Open profit/loss” holds a cost</h3>
+      <pre>INFOACCOUNT;10:00:00;A0000;1500.0;1180;<b>95667.0</b>;98347.0;PROD</pre>
+      <p>That field is the portfolio's <b>carrying cost</b>, reconciled to the cent — not a gain. The open P&amp;L is the one before it. Reading them the way they are named overstates the profit by nearly an order of magnitude.</p>
+    </div>
+  </div>
+</section>
+
+<div class="wrap">
   <footer>
-    <a href="https://github.com/simoneb/directa-mcp">Source</a> ·
-    <a href="https://github.com/simoneb/directa-mcp/blob/master/docs/PROTOCOL.md">Protocol notes</a> ·
-    MIT licence. Not affiliated with Directa SIM.
+    <span>MIT licence</span>
+    <a href="https://github.com/simoneb/directa-mcp">Source</a>
+    <a href="https://github.com/simoneb/directa-mcp/blob/master/docs/PROTOCOL.md">Protocol notes</a>
+    <a href="https://github.com/simoneb/directa-mcp/issues">Issues</a>
+    <span>Not affiliated with Directa SIM.</span>
   </footer>
-</main>
+</div>
 
 <script>
 const REPO = "simoneb/directa-mcp";
-const FALLBACK = "<TAG>";  // se l'API non risponde, meglio un segnaposto che una versione vecchia in silenzio
 
+/* ---------------- the wire ---------------- */
+const TAPE = [
+  ['sent', 'FLOWPOINT TRUE'],
+  ['recv', 'FLOWPOINT;TRUE'],
+  ['note', 'without this, a list arrives with nothing marking its end'],
+  ['sent', 'INFOSTOCKS'],
+  ['dim',  'BEGIN STOCKLIST'],
+  ['recv', 'STOCK;ENI.MI;10:00:00;100;0;0;13.5;120'],
+  ['recv', 'STOCK;M.100001;10:00:00;20000;0;0;{95.0};200'],
+  ['note', '{95.0} is per cent of nominal → €19,000, not €1.9M'],
+  ['dim',  'END STOCKLIST'],
+];
+
+const tape = document.getElementById("tape");
+
+// A note is a block element: it breaks the line itself, so a newline either
+// side of one would open a gap in the tape.
+const join = rows => rows.map(([kind, text], i) => {
+  const afterNote = i > 0 && rows[i - 1][0] === "note";
+  const sep = i > 0 && !afterNote && kind !== "note" ? "\n" : "";
+  return sep + lineHTML(kind, text);
+}).join("");
+
+function lineHTML(kind, text) {
+  const safe = text.replace(/[&<>]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" }[c]));
+  const marked = safe.replace(/\{(.+?)\}/g, '<span class="field">$1</span>');
+  if (kind === "note") {
+    return `<span class="note">└─ ${marked.replace(/<span class="field">(.+?)<\/span>/, "<b>$1</b>")}</span>`;
+  }
+  return `<span class="${kind}">${marked}</span>`;
+}
+
+const reduce = matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+if (reduce) {
+  tape.innerHTML = join(TAPE);
+} else {
+  // One orchestrated moment: the session replays as it happened, then settles.
+  tape.innerHTML = '<span class="caret"></span>';
+  let i = 0;
+  const step = () => {
+    const shown = TAPE.slice(0, i);
+    const afterNote = i > 0 && shown[i - 1][0] === "note";
+    tape.innerHTML = join(shown) + (i > 0 && !afterNote ? "\n" : "") + '<span class="caret"></span>';
+    if (++i <= TAPE.length) setTimeout(step, TAPE[i - 1][0] === "note" ? 240 : 140);
+    else tape.innerHTML = join(TAPE);
+  };
+  setTimeout(step, 240);
+}
+
+/* ---------------- config, always at the latest release ---------------- */
 const tarball = tag => `https://github.com/${REPO}/archive/refs/tags/${tag}.tar.gz`;
 
 function render(tag, published, mcpbUrl) {
@@ -159,37 +472,35 @@ function render(tag, published, mcpbUrl) {
   document.getElementById("tag").textContent = tag;
   document.getElementById("rel-link").href = `https://github.com/${REPO}/releases/tag/${tag}`;
   if (published) {
-    document.getElementById("rel-date").textContent =
-      new Date(published).toLocaleDateString(undefined, { year: "numeric", month: "long", day: "numeric" });
+    document.getElementById("rel-date").textContent = new Date(published)
+      .toLocaleDateString("en-GB", { year: "numeric", month: "short", day: "numeric" });
   }
   if (mcpbUrl) document.getElementById("mcpb").href = mcpbUrl;
 
   document.getElementById("json").textContent = JSON.stringify({
-    mcpServers: {
-      directa: {
-        command: "uvx",
-        args: ["--from", from, "directa-mcp"],
-        env: { DIRECTA_ENABLE_ORDERS: "false" }
-      }
-    }
+    mcpServers: { directa: {
+      command: "uvx",
+      args: ["--from", from, "directa-mcp"],
+      env: { DIRECTA_ENABLE_ORDERS: "false" }
+    }}
   }, null, 2);
 
   document.getElementById("toml").textContent =
-    `[mcp_servers.directa]\ncommand = "uvx"\nargs = ["--from", "${from}", "directa-mcp"]\n\n` +
+    `[mcp_servers.directa]\ncommand = "uvx"\nargs = [\n  "--from",\n  "${from}",\n  "directa-mcp"\n]\n\n` +
     `[mcp_servers.directa.env]\nDIRECTA_ENABLE_ORDERS = "false"`;
 
   document.getElementById("cli").textContent =
-    `# Claude Code\nclaude mcp add directa --scope user -- uvx --from "${from}" directa-mcp\n\n` +
-    `# Codex CLI\ncodex mcp add directa -- uvx --from "${from}" directa-mcp`;
+    `# Claude Code\nclaude mcp add directa --scope user -- \\\n  uvx --from "${from}" directa-mcp\n\n` +
+    `# Codex CLI\ncodex mcp add directa -- \\\n  uvx --from "${from}" directa-mcp`;
 
-  const vscode = { type: "stdio", command: "uvx", args: ["--from", from, "directa-mcp"],
-                   env: { DIRECTA_ENABLE_ORDERS: "false" } };
   document.getElementById("vscode").href =
-    "https://vscode.dev/redirect/mcp/install?name=directa&config=" + encodeURIComponent(JSON.stringify(vscode));
+    "https://vscode.dev/redirect/mcp/install?name=directa&config=" +
+    encodeURIComponent(JSON.stringify({
+      type: "stdio", command: "uvx", args: ["--from", from, "directa-mcp"],
+      env: { DIRECTA_ENABLE_ORDERS: "false" }
+    }));
 }
 
-// The page carries no version of its own: the tag comes from whatever the latest
-// release is, so a new release updates these snippets with nothing to edit here.
 fetch(`https://api.github.com/repos/${REPO}/releases/latest`)
   .then(r => r.ok ? r.json() : Promise.reject(r.status))
   .then(r => {
@@ -197,17 +508,16 @@ fetch(`https://api.github.com/repos/${REPO}/releases/latest`)
     render(r.tag_name, r.published_at, asset && asset.browser_download_url);
   })
   .catch(() => {
-    render(FALLBACK, null, null);
-    document.getElementById("rel-date").textContent =
-      "could not reach GitHub — take the tag from the releases page";
+    // A placeholder beats a version that has quietly gone stale.
+    render("<TAG>", null, null);
+    document.getElementById("rel-date").textContent = "couldn't reach GitHub — take the tag from the releases page";
   });
 
 document.querySelectorAll("[data-copy]").forEach(btn => {
   btn.addEventListener("click", async () => {
     await navigator.clipboard.writeText(document.getElementById(btn.dataset.copy).textContent);
-    const was = btn.textContent;
-    btn.textContent = "Copied";
-    setTimeout(() => { btn.textContent = was; }, 1200);
+    btn.textContent = "Copied"; btn.dataset.done = "1";
+    setTimeout(() => { btn.textContent = "Copy"; delete btn.dataset.done; }, 1400);
   });
 });
 </script>
