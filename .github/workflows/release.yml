@@ -1,0 +1,108 @@
+name: Release
+
+# Tag-driven: `git tag vX.Y.Z && git push --tags` is the whole ritual. The tag
+# is the source of truth for what gets released, so the version in pyproject
+# has to agree with it — releasing a package that reports a different version
+# than its tag is a bug this checks for rather than ships.
+on:
+  push:
+    tags: ['v*']
+
+jobs:
+  check-version:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Tag must match the packaged version
+        run: |
+          tag="${GITHUB_REF_NAME#v}"
+          packaged=$(grep -m1 '^version = ' pyproject.toml | cut -d'"' -f2)
+          if [ "$tag" != "$packaged" ]; then
+            echo "::error::tag $GITHUB_REF_NAME does not match pyproject version $packaged"
+            exit 1
+          fi
+          echo "version $packaged"
+
+  test:
+    needs: check-version
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [windows-latest, ubuntu-latest]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          python-version: '3.13'
+      - run: uv pip install --system -e ".[dev]"
+      - run: pytest -q
+
+  build:
+    needs: test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+      - run: uv build
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: dist/
+
+  github-release:
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist/
+      # The release notes are the commit subjects since the previous tag. The
+      # install snippet is spelled out because the README deliberately carries
+      # no version number — this is where a reader finds the tag to paste.
+      - name: Create the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          tag="$GITHUB_REF_NAME"
+          previous=$(git tag --sort=-version:refname | grep -A1 -x "$tag" | tail -n1)
+          {
+            echo "Register the server with:"
+            echo
+            echo '```'
+            echo "uvx --from \"https://github.com/${GITHUB_REPOSITORY}/archive/refs/tags/${tag}.tar.gz\" directa-mcp"
+            echo '```'
+            echo
+            echo "## Changes"
+            echo
+            if [ -n "$previous" ] && [ "$previous" != "$tag" ]; then
+              git log --no-merges --pretty='- %s' "${previous}..${tag}"
+            else
+              git log --no-merges --pretty='- %s' "$tag"
+            fi
+          } > notes.md
+          gh release create "$tag" dist/* --title "$tag" --notes-file notes.md
+
+  pypi:
+    needs: build
+    runs-on: ubuntu-latest
+    # Trusted publishing: PyPI verifies this workflow's OIDC identity, so no
+    # API token is stored anywhere. It needs a one-time publisher configured on
+    # PyPI first, so the step stays off until the repository variable
+    # PUBLISH_TO_PYPI is set to 'true' — otherwise every release would fail on
+    # a step that cannot yet succeed.
+    if: vars.PUBLISH_TO_PYPI == 'true'
+    environment: pypi
+    permissions:
+      id-token: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist/
+      - uses: pypa/gh-action-pypi-publish@release/v1

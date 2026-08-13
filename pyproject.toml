@@ -26,7 +26,6 @@ classifiers = [
   "Programming Language :: Python :: 3.12",
   "Programming Language :: Python :: 3.13",
   "Topic :: Office/Business :: Financial :: Investment",
-  "Private :: Do Not Upload",
 ]
 dependencies = [
   "mcp>=1.6.0,<2.0",
