@@ -286,9 +286,9 @@
       </p>
     </div>
 
-    <!-- The signature: the actual exchange this server had to decode. -->
-    <div class="wire" aria-label="A recorded dAPI session on the trading port">
-      <div class="wire-head"><span>trading port · 10002</span><span>latin-1 · CRLF</span></div>
+    <!-- The signature: a tool result, as the client renders it. -->
+    <div class="wire" aria-label="A get_portfolio_overview tool result as an MCP client shows it">
+      <div class="wire-head"><span>get_portfolio_overview</span><span>tool result</span></div>
       <pre id="tape" aria-live="off"></pre>
     </div>
   </div>
@@ -421,16 +421,21 @@
 const REPO = "simoneb/directa-mcp";
 
 /* ---------------- the wire ---------------- */
+// What a client actually puts on screen when it calls this server. The raw
+// dAPI exchange underneath is more exotic, and it used to be what this showed
+// — but nobody using the server ever sees the wire, so showing it was showing
+// off rather than informing. The bond below is the trap that matters, caught
+// in the one place a reader will meet it.
 const TAPE = [
-  ['sent', 'FLOWPOINT TRUE'],
-  ['recv', 'FLOWPOINT;TRUE'],
-  ['note', 'without this, a list arrives with nothing marking its end'],
-  ['sent', 'INFOSTOCKS'],
-  ['dim',  'BEGIN STOCKLIST'],
-  ['recv', 'STOCK;ENI.MI;10:00:00;100;0;0;13.5;120'],
-  ['recv', 'STOCK;M.100001;10:00:00;20000;0;0;{95.0};200'],
-  ['note', '{95.0} is per cent of nominal → €19,000, not €1.9M'],
-  ['dim',  'END STOCKLIST'],
+  ['sent', 'get_portfolio_overview()'],
+  ['dim',  '{'],
+  ['recv', '  "symbol": "M.100001",'],
+  ['recv', '  "quantity": 20000,'],
+  ['recv', '  "price": {95.0},'],
+  ['recv', '  "value": 19000.0,'],
+  ['note', 'quoted per cent of nominal — €19,000, not €1.9M'],
+  ['recv', '  "reconciled": true'],
+  ['dim',  '}'],
 ];
 
 const tape = document.getElementById("tape");
@@ -457,7 +462,8 @@ const reduce = matchMedia("(prefers-reduced-motion: reduce)").matches;
 if (reduce) {
   tape.innerHTML = join(TAPE);
 } else {
-  // One orchestrated moment: the session replays as it happened, then settles.
+  // One orchestrated moment: the result streams in as it does in the client,
+  // then settles.
   tape.innerHTML = '<span class="caret"></span>';
   let i = 0;
   const step = () => {
