@@ -1,3 +1,9 @@
+# .env first and deliberately. The rest of this file is about bundle size; this
+# line is about not packing a local .env into an artefact that is published and
+# downloaded. Releases are built in CI from a clean checkout where no .env
+# exists — but `mcpb pack .` run on a developer machine packs the working tree
+# as it finds it, and there the file usually does exist.
+.env
 .venv/
 .git/
 .github/
